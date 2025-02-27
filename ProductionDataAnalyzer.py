@@ -297,8 +297,9 @@ class ProductionDataAnalyzer:
         """
         # Remove duplicate rows, keeping the first occurence
         df = df.drop_duplicates(keep='first')
-        # Sort by the date column and reset index
-        df = df.sort_values(date_col).reset_index(drop=True)
+        if date_col in df.columns:
+            # Sort by the date column and reset index
+            df = df.sort_values(date_col).reset_index(drop=True)
         # Optimize data types for memory efficiency
         return ProductionDataAnalyzer._optimize_dtypes(df, date_col)
 
@@ -337,5 +338,37 @@ class ProductionDataAnalyzer:
 
         return df
 
-    def asdf():
-        pass
+    @staticmethod
+    def filter_by_id(production_data_df: pd.DataFrame, id_data_df: pd.DataFrame, id_col: str = 'serial_number') -> pd.DataFrame:
+        """
+        Filter DataFrame by matching IDs from another DataFrame
+
+        Parameters:
+            df (pd.DataFrame):    DataFrame to filter
+            df_id (pd.DataFrame): DataFrame containing IDs to match
+            id_col (str):         Name of the ID column in both DataFrames
+        
+        Returns:
+            pd.DataFrame: Filtered DataFrame
+        """
+        return df[df[id_col].isin(df_id[id_col])]
+
+    @staticmethod
+    def save_to_csv(df: pd.DataFrame,
+                    filename: str = 'output.csv',
+                    sep: str = ';',
+                    decimal: str = ','
+    ) -> None:
+        """
+        Save DataFrame to CSV file
+
+        Parameters:
+            df (pd.DataFrame): DataFrame to save
+            filename (str):    Name of the CSV file to save to
+            sep (str):         Separator used in the CSV file
+            decimal (str):     Decimal separator used in the CSV file
+        
+        Returns:
+            None
+        """
+        df.to_csv(filename=filename, sep=sep, decimal=decimal, index=False)
