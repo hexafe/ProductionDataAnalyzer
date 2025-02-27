@@ -378,4 +378,4 @@ class ProductionDataAnalyzer:
         Returns:
             None
         """
-        df.to_csv(filename=filename, sep=sep, decimal=decimal, index=False)
+        df.to_csv(filename, sep=sep, decimal=decimal, index=False)
