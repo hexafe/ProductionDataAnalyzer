@@ -133,8 +133,8 @@ class ProductionDataAnalyzer:
         params = len(self.selected_params)
         print(f"Analyzer initialized with {len(self.production):,} records ({params} parameters)")
 
-  @staticmethod
-  def upload_files(
+    @staticmethod
+    def upload_files(
         date_col: str = 'TimeStamp',
         csv_kwargs: dict = None,
         excel_kwargs: dict = None,
@@ -329,5 +329,3 @@ class ProductionDataAnalyzer:
 
     def asdf():
         pass
-
-    
