@@ -1,5 +1,3 @@
-!pip install pyunpack
-
 import os
 import io
 import tempfile
@@ -16,7 +14,7 @@ class ProductionDataAnalyzer:
     1. Clone repository: `!git clone https://github.com/hexafe/ProductionDataAnalyzer.git`
     2. Navigate to the project directory: `%cd ProductionDataAnalyzer`
     3. Install dependencies: `!pip install -r requirements.txt`
-    4. Import directly: `from production_analysis import ProductionDataAnalyzer`
+    4. Import directly: `from ProductionDataAnalyzer import ProductionDataAnalyzer`
 
     Core Capabilities - to be implemented:
     ------------------
@@ -337,5 +335,3 @@ class ProductionDataAnalyzer:
 
     def asdf():
         pass
-
-    
