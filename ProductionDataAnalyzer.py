@@ -1,3 +1,5 @@
+!pip install pyunpack
+
 import os
 import io
 import tempfile
@@ -9,6 +11,12 @@ from pyunpack import Archive
 class ProductionDataAnalyzer:
     """
     Industrial data analysis toolkit with integrated quality analytics
+    
+    **Google Colab Integration**:
+    1. Clone repository: `!git clone https://github.com/hexafe/ProductionDataAnalyzer.git`
+    2. Navigate to the project directory: `%cd ProductionDataAnalyzer`
+    3. Install dependencies: `!pip install -r requirements.txt`
+    4. Import directly: `from production_analysis import ProductionDataAnalyzer`
 
     Core Capabilities - to be implemented:
     ------------------
@@ -19,7 +27,7 @@ class ProductionDataAnalyzer:
 
     2. **Temporal Analysis**
        - Flexible aggregation (minute/hourly/daily)
-       - Statistical timeframe comparison (Welch's t-test)
+       - Statistical timeframe comparison (T-test)
        - Interactive time-series visualization
 
     3. **Machine Learning & Advanced Analytics**
@@ -329,3 +337,5 @@ class ProductionDataAnalyzer:
 
     def asdf():
         pass
+
+    
