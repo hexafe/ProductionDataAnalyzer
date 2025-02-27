@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 from google.colab import files
 from pyunpack import Archive
+import shutil
 
 class ProductionDataAnalyzer:
     """
@@ -227,10 +228,10 @@ class ProductionDataAnalyzer:
                             continue
                     # Process CSV files
                     elif any(lower_fn.endswith(ext) for ext in csv_ext):
-                        if chunk_size is None:
+                        if chunksize is None:
                             df = pd.read_csv(io.BytesIO(content), **csv_kwargs)
                         else:
-                            chunks = pd.read_csv(io.BytesIO(content), chunksize=chunk_size, **csv_kwargs)
+                            chunks = pd.read_csv(io.BytesIO(content), chunksize=chunksize, **csv_kwargs)
                             df = pd.concat(chunks, ignore_index=True)
                         dfs.append(df)
                         print(f"Processed CSV directly: {fn}")
@@ -249,10 +250,10 @@ class ProductionDataAnalyzer:
                     try:
                         lower_suffix = extracted_file.suffix.lower()
                         if lower_suffix in csv_ext:
-                            if chunk_size is None:
+                            if chunksize is None:
                                 df = pd.read_csv(extracted_file, **csv_kwargs)
                             else:
-                                chunks = pd.read_csv(extracted_file, chunksize=chunk_size, **csv_kwargs)
+                                chunks = pd.read_csv(extracted_file, chunksize=chunksize, **csv_kwargs)
                                 df = pd.concat(chunks, ignore_index=True)
                             dfs.append(df)
                             print(f"Processed extracted CSV: {extracted_file.name}")
