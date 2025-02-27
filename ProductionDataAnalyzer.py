@@ -15,6 +15,10 @@ class ProductionDataAnalyzer:
     2. Navigate to the project directory: `%cd ProductionDataAnalyzer`
     3. Install dependencies: `!pip install -r requirements.txt`
     4. Import directly: `from ProductionDataAnalyzer import ProductionDataAnalyzer`
+    !git clone https://github.com/hexafe/ProductionDataAnalyzer.git
+    %cd ProductionDataAnalyzer
+    !pip install -r requirements.txt
+    from ProductionDataAnalyzer import ProductionDataAnalyzer
 
     Core Capabilities - to be implemented:
     ------------------
