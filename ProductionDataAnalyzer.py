@@ -352,7 +352,13 @@ class ProductionDataAnalyzer:
         Returns:
             pd.DataFrame: Filtered DataFrame
         """
-        return df[df[id_col].isin(df_id[id_col])]
+        # Get the list of IDs
+        id_list = id_data_df[id_col].tolist()
+
+        # Create a filter based on list of IDs
+        filter = production_data_df[id_col].isin(id_list)
+
+        return production_data_df[filter]
 
     @staticmethod
     def save_to_csv(df: pd.DataFrame,
