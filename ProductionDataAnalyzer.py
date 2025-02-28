@@ -10,7 +10,7 @@ import shutil
 class ProductionDataAnalyzer:
     """
     Industrial data analysis toolkit with integrated quality analytics
-    
+
     **Google Colab Integration**:
     1. Clone repository: `!git clone https://github.com/hexafe/ProductionDataAnalyzer.git`
     2. Navigate to the project directory: `%cd ProductionDataAnalyzer`
@@ -55,7 +55,7 @@ class ProductionDataAnalyzer:
     Example Workflow:
     -----------------
     >>> analyzer = ProductionDataAnalyzer(
-    ...     raw_data, 
+    ...     raw_data,
     ...     date_col='timestamp',
     ...     part_id_col='serial_number'
     ... )
@@ -117,10 +117,10 @@ class ProductionDataAnalyzer:
         # Input validation
         if not isinstance(production_data, pd.DataFrame):
             raise TypeError("Input data must be a pandas DataFrame")
-            
+
         if date_col not in production_data.columns:
             raise ValueError(f"Column '{date_col}' not found in input data")
-            
+
         if not pd.api.types.is_datetime64_any_dtype(production_data[date_col]):
             raise ValueError(f"Column '{date_col}' must be datetime type")
 
@@ -129,7 +129,7 @@ class ProductionDataAnalyzer:
         self.production = production_data
         self.agg_data = pd.DataFrame()
         self.param_limits = {}
-        
+
         # Configuration
         self.selected_params = list(production_data.columns)
         self.agg_freq = 'D'
@@ -158,10 +158,10 @@ class ProductionDataAnalyzer:
     ) -> pd.DataFrame:
         """
         Upload files (CSV, Excel, and various archives) from Google Colab and return a combined DataFrame
-        
+
         Custom keyword arguments for reading CSV and Excel files can be provided via
         `csv_kwargs` and `excel_kwargs`, respectively. Defaults are used if not specified
-        
+
         Parameters:
             date_col (str):         Name of the column to parse as datetime
             csv_kwargs (dict):      Optional parameters for pd.read_csv
@@ -182,10 +182,10 @@ class ProductionDataAnalyzer:
             chunksize (int):        Number of rows per chunk for processing large CSV files
                                     If None, CSV files are read in one go
                                     Default: 100000
-        
+
         Returns:
             pd.DataFrame: Combined DataFrame after processing all uploaded files
-        
+
         Raises:
             ValueError: If no valid data files are processed
         """
@@ -194,20 +194,20 @@ class ProductionDataAnalyzer:
             'sep': ';',
             'decimal': ',',
             'parse_dates': [date_col],
-            'dayfirst': True,
+            'dayfirst': False,
             'na_values': ['\\N', '']
         }
         csv_kwargs = {**default_csv_kwargs, **(csv_kwargs or {})}
-        
+
         # Merge user-provided Excel options with defaults
         default_excel_kwargs = {'engine': 'openpyxl'}
         excel_kwargs = {**default_excel_kwargs, **(excel_kwargs or {})}
-        
+
         uploaded = files.upload()
         dfs = []
         os.makedirs(tmp_dir, exist_ok=True)
         tmp_dir_path = Path(tmp_dir)
-        
+
         try:
             # Process each uploaded file
             for fn, content in uploaded.items():
@@ -268,7 +268,7 @@ class ProductionDataAnalyzer:
             # Clean up the temporary directory if requested
             if remove_tmp_dir:
                 shutil.rmtree(tmp_dir_path, ignore_errors=True)
-        
+
         if not dfs:
             raise ValueError(
                 "No valid data files processed. Please check:\n"
@@ -276,7 +276,7 @@ class ProductionDataAnalyzer:
                 "2. Archive integrity\n"
                 "3. Supported formats: CSV, Excel, ZIP, 7z, RAR, TAR, GZ"
             )
-        
+
         combined = pd.concat(dfs, ignore_index=True)
         return ProductionDataAnalyzer._post_merge_cleanup(combined, date_col)
 
@@ -292,13 +292,15 @@ class ProductionDataAnalyzer:
         Parameters:
             df (pd.DataFrame): Combined DataFrame
             date_col (str):    Name of the date column
-        
+
         Returns:
             pd.DataFrame: Cleaned and optimized DataFrame
         """
         # Remove duplicate rows, keeping the first occurence
         df = df.drop_duplicates(keep='first')
         if date_col in df.columns:
+            # Ensure the date column is parsed as datetime
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
             # Sort by the date column and reset index
             df = df.sort_values(date_col).reset_index(drop=True)
         # Optimize data types for memory efficiency
@@ -308,11 +310,11 @@ class ProductionDataAnalyzer:
     def _optimize_dtypes(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
         """
         Optimize DataFrame memory usage with safe numeric conversion
-        
+
         Parameters:
             df (pd.DataFrame): DataFrame to optimize
             date_col (str):    Name of the date column
-        
+
         Returns:
             pd.DataFrame: Optimized DataFrame
         """
@@ -348,7 +350,7 @@ class ProductionDataAnalyzer:
             df (pd.DataFrame):    DataFrame to filter
             df_id (pd.DataFrame): DataFrame containing IDs to match
             id_col (str):         Name of the ID column in both DataFrames
-        
+
         Returns:
             pd.DataFrame: Filtered DataFrame
         """
@@ -374,7 +376,7 @@ class ProductionDataAnalyzer:
             filename (str):    Name of the CSV file to save to
             sep (str):         Separator used in the CSV file
             decimal (str):     Decimal separator used in the CSV file
-        
+
         Returns:
             None
         """
