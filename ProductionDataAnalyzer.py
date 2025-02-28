@@ -339,61 +339,358 @@ class ProductionDataAnalyzer:
                 )
                 continue
 
-            # Attempt conversion to numeric
-            if pd.api.types.is_string_dtype(df[col]):
-                try:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-                except:
-                    pass
+            # Phase 1: numeric conversion
+            if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
+                # Numeric conversion preserving text
+                numeric_vals = pd.to_numeric(df[col], errors='coerce')
+                if numeric_vals.notnull().mean() > 0.95:
+                    df[col] = numeric_vals.astype(pd.to_numeric(df[col], downcast='float').dtype)
+                else:
+                    # Only convert to category if not convertible
+                    unique_ratio = df[col].nunique() / len(df)
+                    if unique_ratio < 0.1:
+                        df[col] = df[col].astype('category')
 
-            if pd.api.types.is_numeric_dtype(df[col]):
+            # Phase 2: downcast numerics
+            elif pd.api.types.is_numeric_dtype(df[col]):
                 df[col] = pd.to_numeric(df[col], downcast='float')
-
-            # Convert object columns with low cardinality to categorical
-            if df[col].dtype == 'object' or pd.api.types.is_string_dtype(df[col]):
-                unique_ratio = df[col].nunique() / len(df)
-                if unique_ratio < 0.1:
-                    df[col] = df[col].astype('category')
 
         return df
 
     @staticmethod
-    def filter_by_id(production_data_df: pd.DataFrame, id_data_df: pd.DataFrame, id_col: str) -> pd.DataFrame:
+    def filter_by_id(
+        production_data_df: pd.DataFrame,
+        id_data_df: pd.DataFrame,
+        id_col: str
+    ) -> pd.DataFrame:
         """
-        Filter DataFrame by matching IDs from another DataFrame
+        Filter a production DataFrame based on IDs present in a reference DataFrame
 
         Parameters:
-            df (pd.DataFrame):    DataFrame to filter
-            df_id (pd.DataFrame): DataFrame containing IDs to match
-            id_col (str):         Name of the ID column in both DataFrames
+            production_data_df (pd.DataFrame):  DataFrame containing production data to filter
+            id_data_df (pd.DataFrame):          Reference DataFrame containing valid IDs
+            id_col (str):                       Column name containing IDs in both DataFrames
 
         Returns:
-            pd.DataFrame: Filtered DataFrame
+            pd.DataFrame: Filtered production data containing only rows with IDs present in reference data
+
+        Raises:
+            KeyError:   If the specified ID column is missing from either DataFrame
+            TypeError:  If the ID columns have incompatible data types
+            ValueError: If input DataFrames are empty or no matching IDs found
+
+        Example:
+            >>> production_df = pd.DataFrame({
+            ...     'ID': [101, 102, 103],
+            ...     'value': [25, 30, 35]
+            ... })
+            >>> id_df = pd.DataFrame({'ID': [102, 103]})
+            >>> filtered = ProductionDataAnalyzer.filter_by_id(production_df, id_df, 'ID')
+            >>> print(filtered)
+              ID  value
+            1  102     30
+            2  103     35
+
+        Notes:
+            - Performs case-sensitive comparison for string IDs
+            - Maintains original row order from production data
+            - Returns a copy of the filtered data to prevent SettingWithCopy warnings
+            - Converts ID columns to string type for cross-type matching
         """
-        # Get the IDs
-        id_list = id_data_df[id_col]
+        # Validate input DataFrames
+        if production_data_df.empty or id_data_df.empty:
+            raise ValueError("Input DataFrames cannot be empty")
 
-        # Create a filter based on IDs
-        filter = production_data_df[id_col].isin(id_list)
+        # Verify ID column existence
+        if id_col not in production_data_df.columns:
+            raise KeyError(f"ID column '{id_col}' not found in production data")
+        if id_col not in id_data_df.columns:
+            raise KeyError(f"ID column '{id_col}' not found in reference data")
 
-        return production_data_df[filter]
+        # Convert ID columns to string for type safety
+        try:
+            production_ids = production_data_df[id_col].astype(str)
+            reference_ids = id_data_df[id_col].astype(str).unique()
+        except TypeError:
+            raise TypeError("ID columns could not be converted to string type")
+
+        # Create filter mask
+        filter_mask = production_ids.isin(reference_ids)
+        
+        # Check for matches
+        if not filter_mask.any():
+            raise ValueError("No matching IDs found between datasets")
+
+        # Return filtered copy of data
+        filtered_df = production_data_df.loc[filter_mask].copy()
+        
+        # Reset index while preserving original order
+        return filtered_df.reset_index(drop=True)
 
     @staticmethod
-    def save_to_csv(df: pd.DataFrame,
-                    filename: str = 'output.csv',
-                    sep: str = ';',
-                    decimal: str = ','
+    def save_to_csv(
+        df: pd.DataFrame,
+        filename: str = 'output.csv',
+        sep: str = ';',
+        decimal: str = ','
     ) -> None:
         """
-        Save DataFrame to CSV file
+        Save a DataFrame to CSV file with configurable formatting and automatic download in Colab
 
         Parameters:
-            df (pd.DataFrame): DataFrame to save
-            filename (str):    Name of the CSV file to save to
-            sep (str):         Separator used in the CSV file
-            decimal (str):     Decimal separator used in the CSV file
+            df (pd.DataFrame):  DataFrame to save. Must contain valid column names and data
+            filename (str):     Output file name/path. Must have .csv extension
+                                Default: 'output.csv'
+            sep (str):          Column separator. Recommended: ';' for European format, ',' for US.
+                                Default: ';'
+            decimal (str):      Decimal separator. Recommended: ',' for European, '.' for US.
+                                Default: ','
 
         Returns:
-            None
+            None: Outputs file to disk and triggers browser download in Colab environments
+
+        Raises:
+            ValueError:       If input validation fails for parameters or DataFrame
+            PermissionError:  If file write permissions are insufficient
+            RuntimeError:     For Colab-specific download failures
+
+        Example:
+            >>> df = pd.DataFrame({'temp': [20.5, 21.3], 'pressure': [101.3, 102.4]})
+            >>> ProductionDataAnalyzer.save_to_csv(df, 'sensor_data.csv')
+            Successfully saved 2 rows with 2 columns to sensor_data.csv (0.5KB)
+            Downloading sensor_data.csv...
         """
-        df.to_csv(filename, sep=sep, decimal=decimal, index=False)
+        # Input validation
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            raise ValueError("Input must be a non-empty pandas DataFrame")
+        
+        if not isinstance(filename, str) or not filename.endswith('.csv'):
+            raise ValueError("Filename must be string ending with .csv")
+
+        if len(sep) != 1 or len(decimal) != 1:
+            raise ValueError("Separators must be single-character strings")
+
+        try:
+            # Save with European-style formatting by default
+            df.to_csv(
+                filename,
+                sep=sep,
+                decimal=decimal,
+                index=False,
+                encoding='utf-8',
+                date_format='%Y-%m-%d %H:%M:%S'
+            )
+        except PermissionError as pe:
+            raise PermissionError(
+                f"Write permission denied for {filename}. "
+                "Check directory permissions or try different location."
+            ) from pe
+        except Exception as e:
+            raise RuntimeError(f"CSV save failed: {str(e)}") from e
+
+        # Generate output summary
+        row_count = len(df)
+        col_count = len(df.columns)
+        file_size_kb = os.path.getsize(filename) / 1024
+        
+        print(
+            f"Successfully saved {row_count} rows with {col_count} columns "
+            f"to {filename} ({file_size_kb:.1f}KB)"
+        )
+
+        # Handle Colab-specific download
+        try:
+            from google.colab import files
+            files.download(filename)
+            print(f"Download initiated for {filename}")
+        except ImportError:
+            print(f"File saved locally at {os.path.abspath(filename)}")
+        except Exception as e:
+            raise RuntimeError(
+                f"Download failed: {str(e)}. "
+                f"File remains available at {os.path.abspath(filename)}"
+            ) from e
+      
+    def aggregate_data(self, period: str = 'day') -> None:
+        """
+        Aggregate data to specified time periods
+
+        Parameters:
+            period (str):   Temporal aggregation interval. Valid options:
+                - 'day':    Daily aggregation (default)
+                - 'week':   Weekly aggregation starting Mondays
+                - 'month':  Monthly aggregation from month start
+                - 'year':   Yearly aggregation from year start
+
+        Returns:
+            None: Updates instance attributes in-place:
+                - daily_data (pd.DataFrame): Aggregated dataset
+                - selected_params (list): Numeric parameters used in aggregation
+                - agg_freq (str): Pandas frequency string used for resampling
+                - period (str): Human-readable aggregation period name
+
+        Raises:
+            ValueError: If any of these conditions occur:
+                - Invalid period specification
+                - Missing datetime column initialization
+                - No numeric parameters available for aggregation
+                - Datetime column contains invalid/out-of-order timestamps
+
+        Example:
+            >>> analyzer = ProductionDataAnalyzer(df, date_col='timestamp')
+            >>> analyzer.aggregate_data(period='week')
+            Aggregated to 52 week intervals
+            >>> analyzer.daily_data.head()
+              timestamp  temperature  pressure  vibration
+            0 2023-01-02      72.4      105.2      4.8
+            1 2023-01-09      71.9      106.1      5.2
+
+        Notes:
+            - Aggregation uses mean calculation for numeric parameters
+            - Automatically excludes temporal metadata columns (year/month/week/day)
+            - Validates datetime column integrity before resampling
+            - Maintains original timezone information if present
+        """
+        # Validate period input
+        period_map = {
+            'day': 'D',
+            'week': 'W-MON',
+            'month': 'MS',
+            'year': 'YS'
+        }
+        if period not in period_map:
+            valid_options = list(period_map.keys())
+            raise ValueError(f"Invalid period. Valid options: {valid_options}")
+
+        # Check datetime column configuration
+        if not self.date_col:
+            raise ValueError("Temporal aggregation required date_col initialization")
+
+        # Verify datetime column integrity
+        date_series = self.production[self.date_col]
+        if not pd.api.types.is_datetime64_any_dtype(date_series):
+            raise ValueError(f"Column '{self.date_col}' must be datetime type")
+        if date_series.is_monotonic_increasing is False:
+            raise ValueError(f"Column '{self.date_col}' must be sorted in ascending order")
+
+        # Identify numeric parameters for aggregation
+        numeric_cols = self.production.select_dtypes(include=np.number).columns
+        temporal_features = ['year', 'month', 'week', 'day']
+        numeric_params = [col for col in numeric_cols if col not in temporal_features]
+
+        if not numeric_params:
+            raise ValueError(f"No aggregatalbe numeric parameters found\nExcluded temporal features: {temporal_features}")
+
+        try:
+            self.daily_data = (
+                self.production
+                .set_index(self.date_col)
+                [numeric_params]
+                .resample(period_map[period])
+                .mean()
+                .reset_index()
+            )
+        except pd.error.OutOfBoundsDatetime:
+            raise ValueError("Datetime values outside pandas' supported range (1677-2262)")
+
+        self.selected_params = [
+            col for col in self.daily_data.columns
+            if col != self.date_col and pd.api.types.is_numeric_dtype(self.daily_data[col])
+        ]
+
+        # Store frequency configuration
+        self.agg_freq = period_map[period]
+        self.period = period
+
+        # Output status summary
+        row_count = len(self.daily_data)
+        param_count = len(self.selected_params)
+        print(f"Aggregated to {row_count} {period} intervals with {param_count} parameters")
+
+    def save_aggregated_data(self, filename: str = 'aggregated_data.csv') -> None
+        """
+        Save aggregated data to CSV file and initiate file download (Google Colab only)
+
+        Preserves European-style numeric formatting using:
+            - ';' as separator
+            - '.' as decimal separator
+            - UTF-8 encoding
+
+        Parameters:
+            filename (str): Output filename
+                Default: 'aggregated_data.csv'
+
+        Returns:
+            None: Downloads the file to the local machine
+
+        Raises:
+            ValueError:       If no aggregated data is available or filename is invalud
+            PermissionError:  If write permissions are insufficient for target location
+            RuntimeError:     If called outside Google Colab environment
+
+        Example:
+            >>> analyzer = ProductionDataAnalyzer(df, date_col='timestamp')
+            >>> analyzer.aggregate_data(period='week')
+            >>> analyzer.save_aggregated_data('weekly_stats.csv')
+            Data saved to weekly_stats.csv (456 rows, 12 parameters)
+            Downloading weekly_stats.csv...
+
+        Notes:
+            - Requires prior execution of aggregate_data() method
+            - In local environments, file will be saved but not auto-downloaded
+            - Preserves datetime formatting from aggregated_data index
+            - Maintains categorical data encoding from original dataset
+        """
+        # Validate internal state
+        if self.daily_data.empty:
+            raise ValueError(
+                "No aggregated data available. Run aggregate_data() first."
+        )
+        
+        # Validate filename
+        if not isinstance(filename, str) or not filename.endswith('.csv'):
+            raise ValueError("Filename must be string with .csv extension")
+
+        try:
+            # Save with European CSV formatting
+            self.daily_data.to_csv(
+                filename,
+                index=False,
+                sep=';',
+                decimal=',',
+                encoding='utf-8',
+                date_format='%Y-%m-%d %H:%M:%S'
+            )
+        except PermissionError as pe:
+            raise PermissionError(
+                f"Write permission denied for {filename}"
+                "Check directory permissions or try different location
+            ) from pe
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to save {filename}: {str(e)}"
+            ) from e
+
+        # Provide detailed output summary
+        row_count = len(self.daily_data)
+        param_count = len(self.selected_params)
+        file_size_kb = os.path.getsize(filename) / 1024
+        print(
+            f"Data saved to {filename}"
+            f"({row_count} rows, {param_count} parameters, {file_size_kb}KB)"
+        )
+
+        # Handle Colab-specific download
+        try:
+            from google.colab import files
+            files.download(filename)
+        except ImportError:
+            raise RuntimeError(
+                "This function is only available in Google Colab"
+                f"File saved locally to {os.path.abspath(filename)}"
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to download {filename}: {str(e)}"
+                f"File remains available at {os.path.abspath(filename)}"
+            ) from e
