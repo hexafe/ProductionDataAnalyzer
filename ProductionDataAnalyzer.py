@@ -87,7 +87,7 @@ class ProductionDataAnalyzer:
     ...     update_strategy='dynamic_retrain'
     ... )
     """
-    def __init__(self, production_data: pd.DataFrame, date_col: str = 'TimeStamp'):
+    def __init__(self, production_data: pd.DataFrame, date_col: str = None):
         """
         Initialize a production data analyzer with raw data and configuration
 
@@ -95,15 +95,14 @@ class ProductionDataAnalyzer:
             production_data (pd.DataFrame): Input data containing production records
                                             Must contain a datetime column and various parameters to analyze
             date_col (str):                 Name of the datetime column used for temporal analysis
-                                            Must exist in the DataFrame and be datetime dtype
 
         Raises:
             TypeError:  If input data is not a pandas DataFrame
-            ValueError: If specified datetime column is missing or invalid
+            ValueError: If specified datetime column is invalid
 
         Attributes:
             production (pd.DataFrame):  Reference to stored production data
-            date_col (str):             Verified name of datetime column
+            date_col (str):             Name of datetime column
             agg_data (pd.DataFrame):    Placeholder for aggregated analysis results
             param_limits (dict):        Storage for parameter validation limits {param: (min, max)}
             selected_params (list):     Parameters selected for analysis (all columns by default)
@@ -111,18 +110,19 @@ class ProductionDataAnalyzer:
             date_formatters (dict):     Matplotlib date formatters for different time resolutions
 
         Example:
-            >>> analyzer = ProductionDataAnalyzer(df, 'timestamp')
+            >>> analyzer = ProductionDataAnalyzer(production_data=df, date_col='timestamp')
             Analyzer initialized with 1000 records (12 parameters)
         """
         # Input validation
         if not isinstance(production_data, pd.DataFrame):
             raise TypeError("Input data must be a pandas DataFrame")
 
-        if date_col not in production_data.columns:
-            raise ValueError(f"Column '{date_col}' not found in input data")
-
-        if not pd.api.types.is_datetime64_any_dtype(production_data[date_col]):
-            raise ValueError(f"Column '{date_col}' must be datetime type")
+        # Check if date_col exist and is in proper type
+        if date_col:
+            if date_col not in production_data.columns:
+                raise ValueError(f"Column '{date_col}' not found in input data")
+            if not pd.api.types.is_datetime64_any_dtype(production_data[date_col]):
+                raise ValueError(f"Column '{date_col}' must be datetime type")
 
         # Core attributes
         self.date_col = date_col
@@ -141,12 +141,11 @@ class ProductionDataAnalyzer:
         }
 
         # Initialization feedback
-        params = len(self.selected_params)
-        print(f"Analyzer initialized with {len(self.production):,} records ({params} parameters)")
+        print(f"Analyzer initialized with {len(self.production):,} records ({len(self.selected_params)} parameters)")
 
     @staticmethod
     def upload_files(
-        date_col: str = 'TimeStamp',
+        date_col: str = None,
         csv_kwargs: dict = None,
         excel_kwargs: dict = None,
         archive_ext: tuple = ('.zip', '.7z', '.rar', '.tar', '.gz'),
@@ -193,10 +192,17 @@ class ProductionDataAnalyzer:
         default_csv_kwargs = {
             'sep': ';',
             'decimal': ',',
-            'parse_dates': [date_col],
+            'dtype': 'object',
+            'parse_dates': bool(date_col),
             'dayfirst': False,
             'na_values': ['\\N', '']
         }
+        if date_col:
+            default_csv_kwargs['parse_dates'] = [date_col]
+            default_csv_kwargs['date_parser'] = lambda x: pd.to_datetime(
+                x, format='ISO8601', errors='coerce'
+            )
+
         csv_kwargs = {**default_csv_kwargs, **(csv_kwargs or {})}
 
         # Merge user-provided Excel options with defaults
@@ -300,7 +306,11 @@ class ProductionDataAnalyzer:
         df = df.drop_duplicates(keep='first')
         if date_col in df.columns:
             # Ensure the date column is parsed as datetime
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+            df[date_col] = pd.to_datetime(
+                df[date_col],
+                format='ISO8601',
+                errors='coerce'
+            )
             # Sort by the date column and reset index
             df = df.sort_values(date_col).reset_index(drop=True)
         # Optimize data types for memory efficiency
@@ -321,14 +331,18 @@ class ProductionDataAnalyzer:
         for col in df.columns:
             # Convert the date column to datetime using the specific format
             if col == date_col:
-                df[date_col] = pd.to_datetime(df[date_col], format='%d.%m.%Y %H:%M', errors='coerce')
+                df[date_col] = pd.to_datetime(
+                    df[date_col],
+                    format='ISO8601',
+                    errors='coerce'
+                )
                 continue
 
             # Attempt conversion to numeric
             try:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
                 # Only update if conversion yields valid numbers
-                if df[col].notna().all():
+                if df[col].notna().mean() > 0.8:
                     df[col] = pd.to_numeric(df[col], downcast='float')
             except:
                 pass
@@ -342,7 +356,7 @@ class ProductionDataAnalyzer:
         return df
 
     @staticmethod
-    def filter_by_id(production_data_df: pd.DataFrame, id_data_df: pd.DataFrame, id_col: str = 'serial_number') -> pd.DataFrame:
+    def filter_by_id(production_data_df: pd.DataFrame, id_data_df: pd.DataFrame, id_col: str) -> pd.DataFrame:
         """
         Filter DataFrame by matching IDs from another DataFrame
 
@@ -354,10 +368,10 @@ class ProductionDataAnalyzer:
         Returns:
             pd.DataFrame: Filtered DataFrame
         """
-        # Get the list of IDs
-        id_list = id_data_df[id_col].tolist()
+        # Get the IDs
+        id_list = id_data_df[id_col]
 
-        # Create a filter based on list of IDs
+        # Create a filter based on IDs
         filter = production_data_df[id_col].isin(id_list)
 
         return production_data_df[filter]
