@@ -328,6 +328,8 @@ class ProductionDataAnalyzer:
         Returns:
             pd.DataFrame: Optimized DataFrame
         """
+        df = df.copy()
+        
         for col in df.columns:
             # Convert the date column to datetime using the specific format
             if col == date_col:
