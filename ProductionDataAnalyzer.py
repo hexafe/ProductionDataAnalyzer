@@ -3,6 +3,7 @@ import io
 import tempfile
 from pathlib import Path
 import pandas as pd
+import numpy as np
 from google.colab import files
 from pyunpack import Archive
 import shutil
