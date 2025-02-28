@@ -192,7 +192,6 @@ class ProductionDataAnalyzer:
         default_csv_kwargs = {
             'sep': ';',
             'decimal': ',',
-            'dtype': 'object',
             'parse_dates': bool(date_col),
             'dayfirst': False,
             'na_values': ['\\N', '']
@@ -200,7 +199,7 @@ class ProductionDataAnalyzer:
         if date_col:
             default_csv_kwargs['parse_dates'] = [date_col]
             default_csv_kwargs['date_parser'] = lambda x: pd.to_datetime(
-                x, format='ISO8601', errors='coerce'
+                x, format='%d.%m.%Y %H:%M', errors='coerce'
             )
 
         csv_kwargs = {**default_csv_kwargs, **(csv_kwargs or {})}
@@ -308,7 +307,7 @@ class ProductionDataAnalyzer:
             # Ensure the date column is parsed as datetime
             df[date_col] = pd.to_datetime(
                 df[date_col],
-                format='ISO8601',
+                format='%d.%m.%Y %H:%M',
                 errors='coerce'
             )
             # Sort by the date column and reset index
@@ -329,28 +328,29 @@ class ProductionDataAnalyzer:
             pd.DataFrame: Optimized DataFrame
         """
         df = df.copy()
-        
+
         for col in df.columns:
             # Convert the date column to datetime using the specific format
             if col == date_col:
                 df[date_col] = pd.to_datetime(
                     df[date_col],
-                    format='ISO8601',
+                    format='%d.%m.%Y %H:%M',
                     errors='coerce'
                 )
                 continue
 
             # Attempt conversion to numeric
-            try:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                # Only update if conversion yields valid numbers
-                if df[col].notna().mean() > 0.8:
-                    df[col] = pd.to_numeric(df[col], downcast='float')
-            except:
-                pass
+            if pd.api.types.is_string_dtype(df[col]):
+                try:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                except:
+                    pass
+
+            if pd.api.types.is_numeric_dtype(df[col]):
+                df[col] = pd.to_numeric(df[col], downcast='float')
 
             # Convert object columns with low cardinality to categorical
-            if df[col].dtype == 'object':
+            if df[col].dtype == 'object' or pd.api.types.is_string_dtype(df[col]):
                 unique_ratio = df[col].nunique() / len(df)
                 if unique_ratio < 0.1:
                     df[col] = df[col].astype('category')
