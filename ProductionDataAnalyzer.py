@@ -741,17 +741,17 @@ class ProductionDataAnalyzer:
 
         try:
             if isinstance(source, dict):
-                limits = self._process_dict_source(source)
+                limits = _process_dict_source(source)
             elif isinstance(source, str) and 'docs.google.com' in source:
-                limits = self._process_gsheet_source(source)
+                limits = _process_gsheet_source(source)
             elif isinstance(source, pd.DataFrame):
-                limits = self._process_dataframe_source(source)
+                limits = _process_dataframe_source(source)
             else:
                 raise ValueError("Unsupported source type")
         except Exception as e:
             raise RuntimeError(f"Failed to process limits source: {str(e)}") from e
 
-        self._validate_and_store_limits(limits)
+        _validate_and_store_limits(limits)
 
         def _process_dict_source(self, source: Dict) -> Dict:
             """
