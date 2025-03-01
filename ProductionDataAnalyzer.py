@@ -3,7 +3,6 @@ import io
 import tempfile
 from pathlib import Path
 import pandas as pd
-import numpy as np
 from google.colab import files
 from pyunpack import Archive
 import shutil
@@ -608,7 +607,7 @@ class ProductionDataAnalyzer:
         param_count = len(self.selected_params)
         print(f"Aggregated to {row_count} {period} intervals with {param_count} parameters")
 
-    def save_aggregated_data(self, filename: str = 'aggregated_data.csv') -> None
+    def save_aggregated_data(self, filename: str = 'aggregated_data.csv') -> None:
         """
         Save aggregated data to CSV file and initiate file download (Google Colab only)
 
@@ -665,7 +664,7 @@ class ProductionDataAnalyzer:
         except PermissionError as pe:
             raise PermissionError(
                 f"Write permission denied for {filename}"
-                "Check directory permissions or try different location
+                "Check directory permissions or try different location"
             ) from pe
         except Exception as e:
             raise RuntimeError(
