@@ -741,375 +741,375 @@ class ProductionDataAnalyzer:
 
         try:
             if isinstance(source, dict):
-                limits = _process_dict_source(source)
+                limits = self._process_dict_source(source)
             elif isinstance(source, str) and 'docs.google.com' in source:
-                limits = _process_gsheet_source(source)
+                limits = self._process_gsheet_source(source)
             elif isinstance(source, pd.DataFrame):
-                limits = _process_dataframe_source(source)
+                limits = self._process_dataframe_source(source)
             else:
                 raise ValueError("Unsupported source type")
         except Exception as e:
             raise RuntimeError(f"Failed to process limits source: {str(e)}") from e
 
-        _validate_and_store_limits(limits)
+        self._validate_and_store_limits(limits)
 
-        def _process_dict_source(self, source: Dict) -> Dict:
-            """
-            Process dictionary input with validation and conversion
+    def _process_dict_source(self, source: Dict) -> Dict:
+        """
+        Process dictionary input with validation and conversion
 
-            Parameters:
-                source (Dict): Input dictionary in format {parameter: (LSL, USL)}
+        Parameters:
+            source (Dict): Input dictionary in format {parameter: (LSL, USL)}
 
-            Returns:
-                Dict: Processed limits as {parameter: (LSL, USL)} with float values
+        Returns:
+            Dict: Processed limits as {parameter: (LSL, USL)} with float values
 
-            Raises:
-                TypeError:      For invalid data types
-                ValueError:     For data integrity issues
-                RuntimeError:   For unexpected processing failures
+        Raises:
+            TypeError:      For invalid data types
+            ValueError:     For data integrity issues
+            RuntimeError:   For unexpected processing failures
 
-            Example valid input:
-                {'fitting_force': (1000, 2200), 'fitting_height': (20, 20.5)}
+        Example valid input:
+            {'fitting_force': (1000, 2200), 'fitting_height': (20, 20.5)}
 
-            Example invalid input:
-                {123: (20, 30)}                 → TypeError
-                {'': (10, 20)}                  → ValueError
-                'fitting_force': [30]           → ValueError
-                'fitting_force': ('low', 50)    → TypeError
-                'fitting_height': (120, 80)     → ValueError
-            """
-            processed = {}
-    
-            try:
-                if not isinstance(source, dict):
-                    raise TypeError("Input must be a dictionary")
+        Example invalid input:
+            {123: (20, 30)}                 → TypeError
+            {'': (10, 20)}                  → ValueError
+            'fitting_force': [30]           → ValueError
+            'fitting_force': ('low', 50)    → TypeError
+            'fitting_height': (120, 80)     → ValueError
+        """
+        processed = {}
 
-                for param, lim in source.items():
-                    # Validate parameter name
-                    if not isinstance(param, str):
-                        raise TypeError(
-                            f"Parameter name '{param}' must be string (got {type(param)})"
-                        )
-                    
-                    clean_param = param.strip()
-                    if not clean_param:
-                        raise ValueError("Empty parameter name found")
+        try:
+            if not isinstance(source, dict):
+                raise TypeError("Input must be a dictionary")
 
-                    # Validate limits structure
-                    if not isinstance(lim, (list, tuple)) or len(lim) != 2:
-                        raise ValueError(
-                            f"Invalid limits format for {param}. "
-                            f"Expected 2-element sequence, got {type(lim)} with {len(lim)} elements"
-                        )
-
-                    # Convert to floats
-                    try:
-                        lower = float(lim[0])
-                        upper = float(lim[1])
-                    except (TypeError, ValueError) as e:
-                        raise TypeError(
-                            f"Non-numeric limits for {param}: {lim[0]!r}, {lim[1]!r}"
-                        ) from e
-
-                    # Validate limit relationship
-                    if lower >= upper:
-                        raise ValueError(
-                            f"Invalid limits for {param}: "
-                            f"Lower ({lower}) ≥ Upper ({upper})"
-                        )
-
-                    processed[clean_param] = (lower, upper)
-
-                return processed
-
-            except Exception as e:
-                if isinstance(e, (TypeError, ValueError)):
-                    raise
-                raise RuntimeError(f"Dictionary processing failed: {str(e)}") from e
-
-        def _process_gsheet_source(self, url: str) -> Dict:
-            """
-            Validate and process Google Sheets input
-
-            Parameters:
-                url (str): Google Sheets URL containing parameter(s) limits
-
-            Returns:
-                Dict: Processed limits as {parameter: (LSL, USL)}
-
-            Raises:
-                ValueError: For invalid URL format, empty worksheets or inaccessible sheets
-                RuntimeError: For authentication failures or API errors
-                Propagates: Data validation errors from DataFrame processing
-
-            Example valid input:
-                'https://docs.google.com/spreadsheets/d/abc123/edit#gid=0'
-
-            Example invalid input:
-                'https://example.com'   → ValueError
-                Empty sheet             → ValueError
-                Access denied           → ValueError
-            """
-            try:
-                # Validate URL structure
-                if 'docs.google.com' not in url:
-                    raise ValueError(
-                        f"Invalid Google Sheets URL: {url[:50]}..."
-                        "Expected format: 'https://docs.google.com/spreadsheets/d/[ID]/edit'"
-                    )
-
-                # Authenticate and get credentials
-                try:
-                    auth.authenticate_user()
-                    creds, _ = default()
-                except Exception as e:
-                    raise RuntimeError("Google authentication failed") from e
-                
-                # Create client
-                try:
-                    gc = gspread.authorize(creds)
-                except gspread.AuthenticationError as e:
-                    raise RuntimeError("Failed to authorize Google Sheets access") from e
-
-                # Open spreadsheet
-                try:
-                    sheet = gc.open_by_url(url)
-                except gspread.SpreadsheetNotFound:
-                    raise ValueError("Sheet not found or access denied") from None
-
-                # Get first worksheet
-                try:
-                    worksheet = sheet.get_worksheet(0)
-                except IndexError:
-                    raise ValueError("No worksheets found in document") from None
-
-                # Validate worksheet content
-                records = worksheet.get_all_records()
-                if not records:
-                    raise ValueError(
-                        f"Worksheet '{worksheet.title}' is empty "
-                        f"(headers: {worksheet.row_values(1)})"
-                    )
-
-                # Process data through DataFrame pipeline
-                return self._process_dataframe_source(pd.DataFrame(records))
-
-            except gspread.APIError as e:
-                raise RuntimeError(
-                    f"Google Sheets API Error ({e.response.status_code}): {e.response.text}"
-                ) from e
-            except Exception as e:
-                if isinstance(e, (ValueError, RuntimeError)):
-                    raise
-                raise RuntimeError(f"Unexpected error processing Google Sheet: {str(e)}") from e
-            
-        def _process_dataframe_source(self, df: pd.DataFrame) -> Dict:
-            """
-            Validate and process DataFrame input
-
-            Returns:
-                Dict: {parameter: (LSL, USL)}
-
-            Raises:
-                ValueError: For data integrity issues
-                TypeError: For data type mismatches
-                RuntimeError: Foe unexpected processing failures
-            """
-            try:
-                # Check mandatory columns
-                required_columns = {'parameter', 'LSL', 'USL'}
-                missing_columns = required_columns - set(df.columns)
-                if missing_columns:
-                    raise ValueError(
-                        f"Missing required columns: {missing_columns}\n"
-                        f"Existing columns: {list(df.columns)}"
-                    )
-
-                # Remove potential whitespace in parameter names
-                df['parameter'] = df['parameter'].str.strip()
-
-                # Check for empty parameters
-                empty_params = df[df['parameter'].isnull() | (df['parameter'] == '')]
-                if not empty_params.empty:
-                    raise ValueError(
-                        f"Empty parameter names found at rows: {empty_params.index.tolist()}"
-                    )
-                
-                # Validate numeric limits
-                for col in ['USL', 'LSL']:
-                    if not pd.api.types.is_numeric_dtype(df[col]):
-                        invalid_rows = df[pd.to_numeric(df[col], errors='coerce').isnull()]
-                        raise TypeError(
-                            f"Non-numeric values in {col} column:\n"
-                            f"{invalid_rows[[col]].to_string()}"
-                        )
-                
-                # Check LSL < USL consistency
-                invalid_limits = df[df['LSL'] >= df['USL']]
-                if not invalid_limits.empty:
-                    error_list = "\n".join(
-                        f"- {row['parameter']}: LSL={row['LSL']} ≥ USL={row['USL']}"
-                        for _, row in invalid_limits.iterrows()
-                    )
-                    raise ValueError(
-                        f"Lower limit exceeds upper limit for parameters:{error_list}"
-                    )
-
-                # Check for duplicate parameters
-                duplicates = df[df.duplicated('parameter', keep=False)]
-                if not duplicates.empty:
-                    dupe_list = '\n'.join(
-                        f"- {param} ({count} entries)"
-                        for param, count in duplicates['parameter'].value_counts().items()
-                    )
-                    raise ValueError(
-                        f"Duplicate parameter entries found: \n{dupe_list}"
-                    )
-
-                # Convert to formated dictionary
-                return {
-                    df.set_index('parameter')
-                    [['LSL', 'USL']]
-                    .apply(tuple, axis=1)
-                    .to_dict()
-                }
-
-            except KeyError as ke:
-                raise RecursionError(f"Column access error: {str(ke)}") from ke
-            except pd.errors.ParserError as pe:
-                raise ValueError(f"Data parsing failed: {str(pe)}") from pe
-            except Exception as e:
-                raise RuntimeError(f"Data processing failed: {str(e)}") from e
-
-        def _validate_and_store_limits(self, new_limits: Dict) -> None:
-            """
-            Validate and merge parameter(s) limits with existing configuration
-            All the validations are redundant (already done in processing) but oh well, just in case :)
-
-            Parameters:
-                new_limits (Dict): {parameter: (LSL, USL),...} mapping to add/update
-
-            Raises:
-                TypeError: For invalid input types
-                ValueError: For data integrity violations
-                RuntimeError: For unexpected validation failures
-
-            Example valid input:
-                {'fitting_force': (1000, 2200), 'fitting_height': (20, 20.5)}
-
-            Example invalid input:
-                Non-dictionary input            → TypeError
-                Parameter not in dataset        → ValueError
-                Non-numeric parameter column    → ValueError
-                Lower ≥ upper limit             → ValueError
-            """
-            try:
-                # Input type validation
-                if not isinstance(new_limits, dict):
+            for param, lim in source.items():
+                # Validate parameter name
+                if not isinstance(param, str):
                     raise TypeError(
-                        f"Limits must be dictionary, got '{type(new_limits)}'"
+                        f"Parameter name '{param}' must be string (got {type(param)})"
                     )
-                if not new_limits:
-                    raise ValueError("Cannot store empty limits dictionary")
+                
+                clean_param = param.strip()
+                if not clean_param:
+                    raise ValueError("Empty parameter name found")
 
-                valid_params = set(self.production.columns)
-                numeric_params = set(
-                    self.production.select_dtypes(include=np.number).columns
+                # Validate limits structure
+                if not isinstance(lim, (list, tuple)) or len(lim) != 2:
+                    raise ValueError(
+                        f"Invalid limits format for {param}. "
+                        f"Expected 2-element sequence, got {type(lim)} with {len(lim)} elements"
+                    )
+
+                # Convert to floats
+                try:
+                    lower = float(lim[0])
+                    upper = float(lim[1])
+                except (TypeError, ValueError) as e:
+                    raise TypeError(
+                        f"Non-numeric limits for {param}: {lim[0]!r}, {lim[1]!r}"
+                    ) from e
+
+                # Validate limit relationship
+                if lower >= upper:
+                    raise ValueError(
+                        f"Invalid limits for {param}: "
+                        f"Lower ({lower}) ≥ Upper ({upper})"
+                    )
+
+                processed[clean_param] = (lower, upper)
+
+            return processed
+
+        except Exception as e:
+            if isinstance(e, (TypeError, ValueError)):
+                raise
+            raise RuntimeError(f"Dictionary processing failed: {str(e)}") from e
+
+    def _process_gsheet_source(self, url: str) -> Dict:
+        """
+        Validate and process Google Sheets input
+
+        Parameters:
+            url (str): Google Sheets URL containing parameter(s) limits
+
+        Returns:
+            Dict: Processed limits as {parameter: (LSL, USL)}
+
+        Raises:
+            ValueError: For invalid URL format, empty worksheets or inaccessible sheets
+            RuntimeError: For authentication failures or API errors
+            Propagates: Data validation errors from DataFrame processing
+
+        Example valid input:
+            'https://docs.google.com/spreadsheets/d/abc123/edit#gid=0'
+
+        Example invalid input:
+            'https://example.com'   → ValueError
+            Empty sheet             → ValueError
+            Access denied           → ValueError
+        """
+        try:
+            # Validate URL structure
+            if 'docs.google.com' not in url:
+                raise ValueError(
+                    f"Invalid Google Sheets URL: {url[:50]}..."
+                    "Expected format: 'https://docs.google.com/spreadsheets/d/[ID]/edit'"
                 )
-                existing_params = set(self.param_limits.keys())
 
-                errors = []
-                warnings = []
-                clean_limits = {}
-
-                # Pre-validation for parameters existence and types
-                for param, limits in new_limits.items():
-                    # Parameter name validation
-                    if not isinstance(param, str):
-                        errors.append(
-                            f"Invalid parameter name type '{type(param)}' "
-                            f"for {param} - must be string"
-                        )
-                        continue
-                    
-                    # Parameter existence check
-                    clean_param = param.strip()
-                    if not clean_param:
-                        errors.append("Empty parameter name found")
-                        continue
-                    if clean_param not in valid_params:
-                        errors.append(f"Parameter '{clean_param}' not in dataset")
-                        continue
-
-                    # Limits structure validation
-                    if not isinstance(limits, (tuple, list)) or len(limits) != 2:
-                        errors.append(
-                            f"Invalid limits format for {clean_param}: "
-                            f"Expected 2-element sequence, got {type(limits)} "
-                            f"with {len(limits)} elements"
-                        )
-                        continue
-
-                    # Numeric validation
-                    lower, upper = limits
-                    for val, pos in [(lower, "LSL"), (upper, "USL")]:
-                        if not isinstance(val, (int, float)):
-                            errors.append(
-                                f"{pos} limit for {clean_param} must be numeric, "
-                                f"got '{type(val)}'"
-                            )
-                        if pd.isna(val):
-                            errors.append(
-                                f"{pos} limit for {clean_param} cannot be NaN"
-                            )
-
-                    # Numeric parameter check
-                    if clean_param not in numeric_params:
-                        warnings.append(
-                            f"Parameter '{clean_param}' exists but is non-numeric "
-                            f"(dtype: {self.production[clean_param].dtype})"
-                        )
-
-                    # Limit relationship validation
-                    if not errors[-1:]:
-                        if lower >= upper:
-                            errors.append(
-                                f"Invalid limits for {clean_param}: "
-                                f"LSL={lower} ≥ USL={upper}"
-                            )
-                    
-                    if not errors[-1:]:
-                        clean_limits[clean_param] = (float(lower), float(upper))
-
-                # Raise collected errors
-                if errors:
-                    error_msg = "Validation failed:" + "\n - ".join(errors)
-                    raise ValueError(error_msg)
-
-                # Show warnings
-                if warnings:
-                    print("Validation warnings:" + "\n - ".join(warnings))
-
-                # Track changes
-                new_params = set(clean_limits.keys()) - existing_params
-                updated_params = set(clean_limits.keys()) & existing_params
-
-                # Update stored limits
-                self.param_limits.update(clean_limits)
-
-                # Generate summary
-                summary = [
-                    "Successfully stored parameter(s) limits:",
-                    f"- New parameters: {len(new_params)}",
-                    f"- Updated parameters: {len(updated_params)}",
-                    f"Total configured parameters: {len(self.param_limits)}",
-                    f"Dataset parameters available: {len(numeric_params)}"
-                ]
-                print("\n".join(summary))
-
+            # Authenticate and get credentials
+            try:
+                auth.authenticate_user()
+                creds, _ = default()
             except Exception as e:
-                if isinstance(e, (TypeError, ValueError)):
-                    raise
-                raise RuntimeError(
-                    f"Limit storage failed: {str(e)}"
-                ) from e
+                raise RuntimeError("Google authentication failed") from e
+            
+            # Create client
+            try:
+                gc = gspread.authorize(creds)
+            except gspread.AuthenticationError as e:
+                raise RuntimeError("Failed to authorize Google Sheets access") from e
+
+            # Open spreadsheet
+            try:
+                sheet = gc.open_by_url(url)
+            except gspread.SpreadsheetNotFound:
+                raise ValueError("Sheet not found or access denied") from None
+
+            # Get first worksheet
+            try:
+                worksheet = sheet.get_worksheet(0)
+            except IndexError:
+                raise ValueError("No worksheets found in document") from None
+
+            # Validate worksheet content
+            records = worksheet.get_all_records()
+            if not records:
+                raise ValueError(
+                    f"Worksheet '{worksheet.title}' is empty "
+                    f"(headers: {worksheet.row_values(1)})"
+                )
+
+            # Process data through DataFrame pipeline
+            return self._process_dataframe_source(pd.DataFrame(records))
+
+        except gspread.APIError as e:
+            raise RuntimeError(
+                f"Google Sheets API Error ({e.response.status_code}): {e.response.text}"
+            ) from e
+        except Exception as e:
+            if isinstance(e, (ValueError, RuntimeError)):
+                raise
+            raise RuntimeError(f"Unexpected error processing Google Sheet: {str(e)}") from e
+        
+    def _process_dataframe_source(self, df: pd.DataFrame) -> Dict:
+        """
+        Validate and process DataFrame input
+
+        Returns:
+            Dict: {parameter: (LSL, USL)}
+
+        Raises:
+            ValueError: For data integrity issues
+            TypeError: For data type mismatches
+            RuntimeError: Foe unexpected processing failures
+        """
+        try:
+            # Check mandatory columns
+            required_columns = {'parameter', 'LSL', 'USL'}
+            missing_columns = required_columns - set(df.columns)
+            if missing_columns:
+                raise ValueError(
+                    f"Missing required columns: {missing_columns}\n"
+                    f"Existing columns: {list(df.columns)}"
+                )
+
+            # Remove potential whitespace in parameter names
+            df['parameter'] = df['parameter'].str.strip()
+
+            # Check for empty parameters
+            empty_params = df[df['parameter'].isnull() | (df['parameter'] == '')]
+            if not empty_params.empty:
+                raise ValueError(
+                    f"Empty parameter names found at rows: {empty_params.index.tolist()}"
+                )
+            
+            # Validate numeric limits
+            for col in ['USL', 'LSL']:
+                if not pd.api.types.is_numeric_dtype(df[col]):
+                    invalid_rows = df[pd.to_numeric(df[col], errors='coerce').isnull()]
+                    raise TypeError(
+                        f"Non-numeric values in {col} column:\n"
+                        f"{invalid_rows[[col]].to_string()}"
+                    )
+            
+            # Check LSL < USL consistency
+            invalid_limits = df[df['LSL'] >= df['USL']]
+            if not invalid_limits.empty:
+                error_list = "\n".join(
+                    f"- {row['parameter']}: LSL={row['LSL']} ≥ USL={row['USL']}"
+                    for _, row in invalid_limits.iterrows()
+                )
+                raise ValueError(
+                    f"Lower limit exceeds upper limit for parameters:{error_list}"
+                )
+
+            # Check for duplicate parameters
+            duplicates = df[df.duplicated('parameter', keep=False)]
+            if not duplicates.empty:
+                dupe_list = '\n'.join(
+                    f"- {param} ({count} entries)"
+                    for param, count in duplicates['parameter'].value_counts().items()
+                )
+                raise ValueError(
+                    f"Duplicate parameter entries found: \n{dupe_list}"
+                )
+
+            # Convert to formated dictionary
+            return {
+                df.set_index('parameter')
+                [['LSL', 'USL']]
+                .apply(tuple, axis=1)
+                .to_dict()
+            }
+
+        except KeyError as ke:
+            raise RecursionError(f"Column access error: {str(ke)}") from ke
+        except pd.errors.ParserError as pe:
+            raise ValueError(f"Data parsing failed: {str(pe)}") from pe
+        except Exception as e:
+            raise RuntimeError(f"Data processing failed: {str(e)}") from e
+
+    def _validate_and_store_limits(self, new_limits: Dict) -> None:
+        """
+        Validate and merge parameter(s) limits with existing configuration
+        All the validations are redundant (already done in processing) but oh well, just in case :)
+
+        Parameters:
+            new_limits (Dict): {parameter: (LSL, USL),...} mapping to add/update
+
+        Raises:
+            TypeError: For invalid input types
+            ValueError: For data integrity violations
+            RuntimeError: For unexpected validation failures
+
+        Example valid input:
+            {'fitting_force': (1000, 2200), 'fitting_height': (20, 20.5)}
+
+        Example invalid input:
+            Non-dictionary input            → TypeError
+            Parameter not in dataset        → ValueError
+            Non-numeric parameter column    → ValueError
+            Lower ≥ upper limit             → ValueError
+        """
+        try:
+            # Input type validation
+            if not isinstance(new_limits, dict):
+                raise TypeError(
+                    f"Limits must be dictionary, got '{type(new_limits)}'"
+                )
+            if not new_limits:
+                raise ValueError("Cannot store empty limits dictionary")
+
+            valid_params = set(self.production.columns)
+            numeric_params = set(
+                self.production.select_dtypes(include=np.number).columns
+            )
+            existing_params = set(self.param_limits.keys())
+
+            errors = []
+            warnings = []
+            clean_limits = {}
+
+            # Pre-validation for parameters existence and types
+            for param, limits in new_limits.items():
+                # Parameter name validation
+                if not isinstance(param, str):
+                    errors.append(
+                        f"Invalid parameter name type '{type(param)}' "
+                        f"for {param} - must be string"
+                    )
+                    continue
+                
+                # Parameter existence check
+                clean_param = param.strip()
+                if not clean_param:
+                    errors.append("Empty parameter name found")
+                    continue
+                if clean_param not in valid_params:
+                    errors.append(f"Parameter '{clean_param}' not in dataset")
+                    continue
+
+                # Limits structure validation
+                if not isinstance(limits, (tuple, list)) or len(limits) != 2:
+                    errors.append(
+                        f"Invalid limits format for {clean_param}: "
+                        f"Expected 2-element sequence, got {type(limits)} "
+                        f"with {len(limits)} elements"
+                    )
+                    continue
+
+                # Numeric validation
+                lower, upper = limits
+                for val, pos in [(lower, "LSL"), (upper, "USL")]:
+                    if not isinstance(val, (int, float)):
+                        errors.append(
+                            f"{pos} limit for {clean_param} must be numeric, "
+                            f"got '{type(val)}'"
+                        )
+                    if pd.isna(val):
+                        errors.append(
+                            f"{pos} limit for {clean_param} cannot be NaN"
+                        )
+
+                # Numeric parameter check
+                if clean_param not in numeric_params:
+                    warnings.append(
+                        f"Parameter '{clean_param}' exists but is non-numeric "
+                        f"(dtype: {self.production[clean_param].dtype})"
+                    )
+
+                # Limit relationship validation
+                if not errors[-1:]:
+                    if lower >= upper:
+                        errors.append(
+                            f"Invalid limits for {clean_param}: "
+                            f"LSL={lower} ≥ USL={upper}"
+                        )
+                
+                if not errors[-1:]:
+                    clean_limits[clean_param] = (float(lower), float(upper))
+
+            # Raise collected errors
+            if errors:
+                error_msg = "Validation failed:" + "\n - ".join(errors)
+                raise ValueError(error_msg)
+
+            # Show warnings
+            if warnings:
+                print("Validation warnings:" + "\n - ".join(warnings))
+
+            # Track changes
+            new_params = set(clean_limits.keys()) - existing_params
+            updated_params = set(clean_limits.keys()) & existing_params
+
+            # Update stored limits
+            self.param_limits.update(clean_limits)
+
+            # Generate summary
+            summary = [
+                "Successfully stored parameter(s) limits:",
+                f"- New parameters: {len(new_params)}",
+                f"- Updated parameters: {len(updated_params)}",
+                f"Total configured parameters: {len(self.param_limits)}",
+                f"Dataset parameters available: {len(numeric_params)}"
+            ]
+            print("\n".join(summary))
+
+        except Exception as e:
+            if isinstance(e, (TypeError, ValueError)):
+                raise
+            raise RuntimeError(
+                f"Limit storage failed: {str(e)}"
+            ) from e
