@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import gspread
 from google.colab import files, auth
-from google.auth import detault
+from google.auth import default
 from pyunpack import Archive
 import shutil
 
