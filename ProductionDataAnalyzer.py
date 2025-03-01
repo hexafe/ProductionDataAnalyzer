@@ -316,44 +316,55 @@ class ProductionDataAnalyzer:
         return ProductionDataAnalyzer._optimize_dtypes(df, date_col)
 
     @staticmethod
-    def _optimize_dtypes(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
+    def _optimize_dtypes(
+        df: pd.DataFrame,
+        date_col: str,
+        numeric_threshold: float = 0.95,
+        categorical_threshold: float = 0.1
+    ) -> pd.DataFrame:
         """
         Optimize DataFrame memory usage with safe numeric conversion
 
         Parameters:
-            df (pd.DataFrame): DataFrame to optimize
-            date_col (str):    Name of the date column
+            df (pd.DataFrame):              DataFrame to optimize
+            date_col (str):                 Name of the date column
+            numeric_threshold (float):      Proportion of unique values to consider numeric
+            categorical_threshold (float):  Proportion of unique values to consider categorical
 
         Returns:
             pd.DataFrame: Optimized DataFrame
         """
+        # Work on a copy to avoid modifying the original DataFrame
         df = df.copy()
 
         for col in df.columns:
-            # Convert the date column to datetime using the specific format
+            # Process the date column
             if col == date_col:
-                df[date_col] = pd.to_datetime(
-                    df[date_col],
+                df[col] = pd.to_datetime(
+                    df[col],
                     format='%d.%m.%Y %H:%M',
                     errors='coerce'
                 )
                 continue
 
-            # Phase 1: numeric conversion
+            # Process object/string columns
             if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
-                # Numeric conversion preserving text
                 numeric_vals = pd.to_numeric(df[col], errors='coerce')
-                if numeric_vals.notnull().mean() > 0.95:
-                    df[col] = numeric_vals.astype(pd.to_numeric(df[col], downcast='float').dtype)
+                valid_ratio = numeric_vals.notnull().mean()
+                if valid_ratio >= numeric_threshold:
+                    if numeric_vals.dropna().apply(float.is_integer).all():
+                        df[col] = pd.to_numeric(numeric_vals, downcast='integer')
+                    else:
+                        df[col] = pd.to_numeric(numeric_vals, downcast='float')
                 else:
-                    # Only convert to category if not convertible
                     unique_ratio = df[col].nunique() / len(df)
-                    if unique_ratio < 0.1:
+                    if unique_ratio <= categorical_threshold:
                         df[col] = df[col].astype('category')
-
-            # Phase 2: downcast numerics
             elif pd.api.types.is_numeric_dtype(df[col]):
-                df[col] = pd.to_numeric(df[col], downcast='float')
+                if pd.api.types.is_integer_dtype(df[col]):
+                    df[col] = pd.to_numeric(df[col], downcast='integer')
+                else:
+                    df[col] = pd.to_numeric(df[col], downcast='float')
 
         return df
 
