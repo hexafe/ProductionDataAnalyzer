@@ -833,76 +833,189 @@ class ProductionDataAnalyzer:
 
         Parameters:
             url (str): Google Sheets URL containing parameter(s) limits
+                - Standard edit URL: https://docs.google.com/spreadsheets/d/<ID>/edit...
+                - Published CSV URL: https://docs.google.com/spreadsheets/d/<ID>/export?format=csv
 
         Returns:
             Dict: Processed limits as {parameter: (LSL, USL)}
 
         Raises:
             ValueError: For invalid URL format, empty worksheets or inaccessible sheets
-            RuntimeError: For authentication failures or API errors
+            RuntimeError: For authentication failures, API errors or CSV export failures
+            TypeError: For non-string URL input
             Propagates: Data validation errors from DataFrame processing
 
         Example valid input:
             'https://docs.google.com/spreadsheets/d/abc123/edit#gid=0'
 
-        Example invalid input:
-            'https://example.com'   → ValueError
-            Empty sheet             → ValueError
-            Access denied           → ValueError
+        Example invalid cases:
+            Invalid URL format: 'https://example.com'   → ValueError
+            Blocked auth + unpublished sheet            → RuntimeError
+            Non-string input: 12345                     → TypeError
+            Empty published sheet                       → ValueError
         """
         try:
-            # Validate URL structure
-            if 'docs.google.com' not in url:
-                raise ValueError(
-                    f"Invalid Google Sheets URL: {url[:50]}..."
-                    "Expected format: 'https://docs.google.com/spreadsheets/d/[ID]/edit'"
-                )
+            # Validate input type
+            if not isinstance(url, str):
+                raise TypeError(f"URL must be string, got '{type(url)}'")
 
-            # Authenticate and get credentials
+            # Try authenticated API access first
             try:
-                auth.authenticate_user()
-                creds, _ = default()
-            except Exception as e:
-                raise RuntimeError("Google authentication failed") from e
-            
-            # Create client
-            try:
-                gc = gspread.authorize(creds)
-            except gspread.AuthenticationError as e:
-                raise RuntimeError("Failed to authorize Google Sheets access") from e
+                return self._process_gsheet_via_api(url)
+            except Exception as api_error:
+                # Fall back to CSV export if API access failed
+                try:
+                    return self._process_gsheet_via_csv(url)
+                except Exception as csv_error:
+                    # Combine error information
+                    raise RuntimeError(
+                        "Failed to access Google Sheet through both methods:\n"
+                        f"API Error: {str(api_error)}\n"
+                        f"CSV Error: {str(csv_error)}\n"
+                        "For CSV fallback, ensure:\n"
+                        "- File → Share → Publish to web\n"
+                        "- Select 'Comma-separated values (.csv)'"
+                    ) from csv_error
 
-            # Open spreadsheet
+        except Exception as e:
+            if isinstance(e, (TypeError, ValueError, RuntimeError)):
+                raise
+            raise RuntimeError(f"Unexpected error processing Google Sheet: {str(e)}") from e
+
+    def _process_gsheet_via_api(self, url: str) -> Dict:
+        """
+        Process Google Sheet input via authenticated API access
+
+        Paramters:
+            url (str): Google Sheets URL with edit access
+
+        Returns:
+            Dict: Processed limits from first worksheet
+
+        Raises:
+            ValueError: For invalid URL, empty sheets or access issues
+            RuntimeError: For authentication/API failures
+            gspread.exceptions.APIError: For Google API issues
+
+        Example failure cases:
+            Corporate authentication/firewall blocking  → RuntimeError
+            Sheet not shared with service account       → ValueError
+            Worksheet contains no data                  → ValueError
+        """
+        # URL validation
+        if 'docs.google.com' not in url or '/spreadsheets/' not in url:
+            raise ValueError(
+                f"Invalif Google Sheets URLL {url[:50]}...\n"
+                "Required format: 'https://docs.google.com/spreadsheets/d/[ID]/edit"
+            )
+
+        try:
+            # Authentication flow
+            auth.authenticate_user()
+            creds, _ = default()
+            gc = gspread.authorize(cred)
+
+            # Sheet access
             try:
                 sheet = gc.open_by_url(url)
             except gspread.SpreadsheetNotFound:
-                raise ValueError("Sheet not found or access denied") from None
+                available_sheets = gc.openall()
+                raise ValueError("Sheet not found") from None
 
-            # Get first worksheet
+            # Worksheet handling
             try:
                 worksheet = sheet.get_worksheet(0)
             except IndexError:
-                raise ValueError("No worksheets found in document") from None
+                raise ValueError("Document contains no worksheets") from None
 
-            # Validate worksheet content
+            # Data validation
             records = worksheet.get_all_records()
             if not records:
                 raise ValueError(
-                    f"Worksheet '{worksheet.title}' is empty "
-                    f"(headers: {worksheet.row_values(1)})"
+                    f"Worksheet '{worksheet.title}' empty (headers: {worksheet.row_values(1)})"
                 )
 
-            # Process data through DataFrame pipeline
             return self._process_dataframe_source(pd.DataFrame(records))
-
-        except gspread.APIError as e:
-            raise RuntimeError(
-                f"Google Sheets API Error ({e.response.status_code}): {e.response.text}"
-            ) from e
-        except Exception as e:
-            if isinstance(e, (ValueError, RuntimeError)):
-                raise
-            raise RuntimeError(f"Unexpected error processing Google Sheet: {str(e)}") from e
         
+        except gspread.AuthenticationError as e:
+            raise RuntimeError(
+                "Google Sheets authentication blocked. Possible reasons:\n"
+                "- Corporate firewall/settings restrictions\n"
+                "- Missing required permissions\n"
+                "- Invalid credentials\n"
+                "Try CSV fallback method instead"
+            ) from e
+
+    def _process_gsheet_via_csv(self, url: str) -> Dict:
+        """
+        Process Google Sheet input via public CSV export
+
+        Parameters:
+            url (str): Google Sheets URL
+
+        Returns:
+            Dict: Processed limits from specified worksheet
+
+        Raises:
+            ValueError:     For unpublished sheets or invalid gid
+            RuntimeError:   For CSV parsing failures
+            KeyError:       If required columns missing
+
+        Example failure cases:
+            Sheet not published to web  → ValueError
+            Invalid worksheet gid       → ValueError
+            Modified CSV structure      → KeyError
+        """
+        from urllib.parse import urlparse, parse_qs
+
+        try:
+            # Extract sheet ID
+            parsed = urlparse(url)
+            if 'spreadsheets' not in parsed.path:
+                raise ValueError("Not a Google Sheets URL")
+                
+            path_parts = parsed.path.split('/')
+            sheet_id = path_parts[path_parts.index('d') + 1] if 'd' in path_parts else None
+            
+            if not sheet_id or len(sheet_id) < 5:
+                raise ValueError(f"Invalid sheet ID in URL: {url[:50]}...")
+            
+            # Extract worksheet ID (gid)
+            gid = '0'
+            if 'gid=' in parsed.fragment:
+                gid = parse_qs(parsed.fragment)['gid'][0]
+            elif 'gid=' in parsed.query:
+                gid = parse_qs(parsed.query)['gid'][0]
+
+            # Build CSV export URL
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+            
+            # Read and validate CSV
+            try:
+                df = pd.read_csv(csv_url)
+            except pd.errors.ParserError:
+                raise ValueError(
+                    "CSV export failed. Verify sheet is published:\n"
+                    "- File → Share → Publish to web\n"
+                    "- Select 'Comma-separated values (.csv)'"
+                ) from None
+
+            if df.empty:
+                raise ValueError(
+                    "Published sheet contains no data. Check:\n"
+                    "- Worksheet has data below header\n"
+                    "- Published range includes data\n"
+                    "- Refresh publication settings"
+                )
+
+            return self._process_dataframe_source(df)
+
+        except (IndexError, KeyError) as e:
+            raise ValueError(
+                f"URL parsing failed: {url[:50]}...\n"
+                "Required format: 'https://docs.google.com/spreadsheets/d/[ID]/edit#gid=[NUM]'"
+            ) from e
+
     def _process_dataframe_source(self, df: pd.DataFrame) -> Dict:
         """
         Validate and process DataFrame input
