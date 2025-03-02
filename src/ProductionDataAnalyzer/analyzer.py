@@ -124,7 +124,9 @@ class ProductionDataAnalyzer:
 
         # Check if date_col exist and is in proper type
         if date_col:
-            if production_data[date_col].isna().all():
+            if date_col not in production_data.columns:
+                raise ValueError(f"Column '{date_col}' not found in input data")
+            if production_data[data_col].isna().all():
                 raise ValueError(f"All values in date column '{date_col}' are null")
             if not pd.api.types.is_datetime64_any_dtype(production_data[date_col]):
                 raise ValueError(f"Column '{date_col}' must be datetime type")
