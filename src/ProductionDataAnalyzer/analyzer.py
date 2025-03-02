@@ -525,7 +525,7 @@ class ProductionDataAnalyzer:
             print(f"File saved locally at {os.path.abspath(filename)}")
         except Exception as e:
             raise RuntimeError(
-                f"Download failed: {str(e)}. "
+                f"Download failed: {str(e)}\n"
                 f"File remains available at {os.path.abspath(filename)}"
             ) from e
       
