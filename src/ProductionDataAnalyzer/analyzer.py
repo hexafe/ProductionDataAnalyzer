@@ -944,7 +944,7 @@ class ProductionDataAnalyzer:
 
             return self._process_dataframe_source(pd.DataFrame(records))
         
-        except gspread.AuthenticationError as e:
+        except gspread.exceptions.AuthenticationError as e:
             raise RuntimeError(
                 "Google Sheets authentication blocked. Possible reasons:\n"
                 "- Corporate firewall/settings restrictions\n"
