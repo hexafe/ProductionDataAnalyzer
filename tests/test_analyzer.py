@@ -79,7 +79,7 @@ class TestFileUpload:
             'category': ['A', 'A', 'A'],
             'float': [1.1, 2.2, 3.3]
         })
-        optimizes = ProductionDataAnalyzer._optimize_dtypes(test_df, None)
+        optimized = ProductionDataAnalyzer._optimize_dtypes(test_df, None)
         assert pd.api.types.is_integer_dtype(optimized['str_num'])
         assert pd.api.types.is_categorical_dtype(optimized['category'])
         assert pd.api.types.is_float_dtype(optimized['float'])
