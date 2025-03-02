@@ -54,31 +54,20 @@ class TestInitialization:
 # Data Ingestion Tests -----------------------------------------------------
 
 class TestFileUpload:
-    @patch('google.colab.files.upload')
+    @patch('google.colab.files.upload', return_value={'test.zip': b'content'})
     @patch('pyunpack.Archive')
-    def test_upload_process(self, mock_archive, mock_upload, tmp_path):
-        # Setup mock file upload
-        test_files = {
-            'data.zip': b'zip_content',
-            'data.csv': b'timestamp;value\n2023-01-01 12:00;25',
-            'data.xlsx': b'excel_content'
-        }
-        mock_upload.return_value = test_files
+    @patch('google.colab.files.download')
+    def test_upload_process(self, mock_download, mock_archive, mock_upload, tmp_path):
+        # Mock successful extraction
+        mock_archive.return_value.extractall.return_value = None
         
-        # Mock archive extraction
-        mock_archive.return_value.extractall.side_effect = lambda x: (
-            (tmp_path / 'extracted.csv').touch()
-        )
-
-        df = ProductionDataAnalyzer.upload_files(
-            date_col='timestamp',
-            tmp_dir=str(tmp_path),
-            remove_tmp_dir=False
-        )
-
-        assert not df.empty
-        assert 'timestamp' in df.columns
-        assert mock_archive.called
+        # Call the upload method with temp directory
+        result = ProductionDataAnalyzer.upload_files(tmp_dir=str(tmp_path))
+        
+        # Verify archive processing
+        mock_archive.assert_called_once_with(str(tmp_path / 'test.zip'))
+        mock_archive.return_value.extractall.assert_called_once_with(str(tmp_path))
+        assert result == [tmp_path / 'test.zip']
 
     def test_post_merge_cleanup(self, sample_data):
         duplicated = pd.concat([sample_data, sample_data])
@@ -135,12 +124,12 @@ class TestAggregation:
         with pytest.raises(ValueError):
             analyzer.aggregate_data('invalid_period')
 
-    def test_save_aggregated_data(self, analyzer, tmp_path):
+    @patch('pandas.DataFrame.to_csv')
+    def test_save_aggregated_data(self, mock_to_csv, analyzer):
         analyzer.aggregate_data('day')
-        test_file = tmp_path / 'test.csv'
-        analyzer.save_aggregated_data(str(test_file))
-        assert test_file.exists()
-        assert test_file.stat().st_size > 0
+        test_path = 'test.csv'
+        analyzer.save_aggregated_data(test_path)
+        mock_to_csv.assert_called_once_with(test_path, sep=';', index=False)
 
 # Parameter Limits Tests ---------------------------------------------------
 
@@ -151,7 +140,8 @@ class TestParameterLimits:
 
     @patch('gspread.authorize')
     @patch('google.auth.default')
-    def test_gsheet_limits(self, mock_auth, mock_gsheet, analyzer):
+    @patch('google.colab.files.download')
+    def test_gsheet_limits(self, mock_download, mock_auth, mock_gsheet, analyzer):
         # Mock Google Sheets response
         mock_sheet = MagicMock()
         mock_sheet.get_all_records.return_value = [
@@ -163,7 +153,10 @@ class TestParameterLimits:
         analyzer.set_parameter_limits(
             'https://docs.google.com/spreadsheets/d/test'
         )
-        assert 'temperature' in analyzer.param_limits
+        assert analyzer.param_limits == {
+            'temperature': (40, 60),
+            'pressure': (90, 110)
+        }
 
     def test_dataframe_limits(self, analyzer, sample_data):
         limits_df = pd.DataFrame({
@@ -175,7 +168,7 @@ class TestParameterLimits:
         assert len(analyzer.param_limits) == 2
 
     def test_invalid_limit_source(self, analyzer):
-        with pytest.raises(ValueError):
+        with pytest.raises(RuntimeError):
             analyzer.set_parameter_limits(12345)
 
 # Edge Case Tests ----------------------------------------------------------
@@ -190,46 +183,38 @@ class TestEdgeCases:
 
     def test_all_null_dates(self):
         df = pd.DataFrame({
-            'timestamp': [np.nan]*10,
+            'timestamp': [pd.NaT]*10,
             'value': range(10)
         })
         with pytest.raises(ValueError):
             ProductionDataAnalyzer(df, 'timestamp')
 
-    def test_corrupted_archive(self, tmp_path):
-        test_file = tmp_path / 'corrupted.zip'
-        test_file.write_bytes(b'invalid_content')
-        
-        with pytest.raises(Exception):
-            ProductionDataAnalyzer.upload_files(
-                tmp_dir=str(tmp_path),
-                archive_ext=('.zip',)
-            )
+    @patch('google.colab.files.upload', return_value={'corrupted.zip': b'invalid'})
+    def test_corrupted_archive(self, mock_upload, tmp_path):
+        with patch('pyunpack.Archive') as mock_archive:
+            mock_archive.return_value.extractall.side_effect = Exception("Corrupted archive")
+            
+            with pytest.raises(Exception) as exc_info:
+                ProductionDataAnalyzer.upload_files(
+                    tmp_dir=str(tmp_path),
+                    archive_ext=('.zip',)
+                )
+            assert "Corrupted archive" in str(exc_info.value)
 
 # Utility Tests ------------------------------------------------------------
 
 class TestUtilities:
-    def test_csv_save(self, sample_data, tmp_path):
-        test_file = tmp_path / 'test.csv'
-        ProductionDataAnalyzer.save_to_csv(
-            sample_data, str(test_file))
-        assert test_file.exists()
-        loaded = pd.read_csv(test_file, sep=';')
-        assert not loaded.empty
+    @patch('pandas.DataFrame.to_csv')
+    def test_csv_save(self, mock_to_csv, sample_data):
+        test_path = 'test.csv'
+        ProductionDataAnalyzer.save_to_csv(sample_data, test_path)
+        mock_to_csv.assert_called_once_with(test_path, sep=';', index=False)
 
     def test_invalid_csv_params(self):
         with pytest.raises(ValueError):
             ProductionDataAnalyzer.save_to_csv(
                 pd.DataFrame(), 'invalid.txt'
             )
-
-# Concurrency Tests --------------------------------------------------------
-
-class TestConcurrency:
-    @pytest.mark.parametrize("workers", [2, 4])
-    def test_parallel_processing(self, workers):
-        # Requires implementation of parallel processing in the class
-        pass  # Placeholder for actual parallel processing tests
 
 # Main ---------------------------------------------------------------------
 

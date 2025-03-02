@@ -357,7 +357,7 @@ class ProductionDataAnalyzer:
                 numeric_vals = pd.to_numeric(df[col], errors='coerce')
                 valid_ratio = numeric_vals.notnull().mean()
                 if valid_ratio >= numeric_threshold:
-                    if numeric_vals.dropna().apply(float.is_integer).all():
+                    if numeric_vals.dropna().apply(lambda x: x == int(x)).all():
                         df[col] = pd.to_numeric(numeric_vals, downcast='integer')
                     else:
                         df[col] = pd.to_numeric(numeric_vals, downcast='float')
@@ -687,6 +687,10 @@ class ProductionDataAnalyzer:
                 f"Failed to save {filename}: {str(e)}"
             ) from e
 
+        except ImportError:
+            print(f"File saved locally at {os.path.abspath(filename)}")
+            return
+
         # Provide detailed output summary
         row_count = len(self.daily_data)
         param_count = len(self.selected_params)
@@ -947,6 +951,10 @@ class ProductionDataAnalyzer:
                 "Try CSV fallback method instead"
             ) from e
 
+        except gspread.exceptions.APIError as e:
+            if "unauthorized" in str(e).lower():
+                raise RuntimeError("Authentication failed") from e
+
     def _process_gsheet_via_csv(self, url: str) -> Dict:
         """
         Process Google Sheet input via public CSV export
@@ -1081,12 +1089,7 @@ class ProductionDataAnalyzer:
                 )
 
             # Convert to formated dictionary
-            return {
-                df.set_index('parameter')
-                [['LSL', 'USL']]
-                .apply(tuple, axis=1)
-                .to_dict()
-            }
+            return df.set_index('parameter')[['LSL', 'USL']].apply(tuple, axis=1).to_dict()
 
         except KeyError as ke:
             raise RecursionError(f"Column access error: {str(ke)}") from ke
