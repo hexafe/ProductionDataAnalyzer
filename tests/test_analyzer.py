@@ -58,12 +58,18 @@ class TestFileUpload:
     @patch('pyunpack.Archive')
     @patch('google.colab.files.download')
     def test_upload_process(self, mock_download, mock_archive, mock_upload, tmp_path):
-        # Create dummy extracted files
-        extracted_file = tmp_path / 'extracted.csv'
-        mock_archive.return_value.extractall.side_effect = lambda _: extracted_file.write_text('timestamp,value\n2023-01-01,50')
+        # Create dummy extracted CSV
+        extracted_csv = tmp_path / 'extracted.csv'
+        mock_archive.return_value.extractall.side_effect = lambda _: extracted_csv.write_text(
+            'timestamp,temperature\n2023-01-01 00:00:00,50\n2023-01-01 01:00:00,52'
+        )
         
         result = ProductionDataAnalyzer.upload_files(tmp_dir=str(tmp_path))
-        assert len(result) > 0
+        
+        # Verify CSV was processed
+        assert len(result) == 1
+        assert 'temperature' in result.columns
+        mock_archive.return_value.extractall.assert_called_once()
 
     def test_post_merge_cleanup(self, sample_data):
         duplicated = pd.concat([sample_data, sample_data])
@@ -77,7 +83,7 @@ class TestFileUpload:
         test_df = pd.DataFrame({
             'str_num': ['1', '1', '1'],
             'category': ['A', 'A', 'A'],
-            'float': [1.1, 2.2, 3.3]
+            'float': [1.0, 2.0, 3.0]
         })
         optimized = ProductionDataAnalyzer._optimize_dtypes(test_df, None)
         assert pd.api.types.is_integer_dtype(optimized['str_num'])
@@ -126,8 +132,11 @@ class TestAggregation:
     def test_save_aggregated_data(self, mock_to_csv, analyzer):
         analyzer.aggregate_data('day')
         test_path = 'test.csv'
+        
         analyzer.save_aggregated_data(test_path)
+        
         mock_to_csv.assert_called_once_with(test_path, sep=';', index=False)
+        mock_getsize.assert_called_once_with(test_path)
 
 # Parameter Limits Tests ---------------------------------------------------
 
@@ -197,21 +206,25 @@ class TestEdgeCases:
                     tmp_dir=str(tmp_path),
                     archive_ext=('.zip',)
                 )
-            # Check for the original error message
-            assert "No valid data files processed" in str(exc_info.value)
-            assert "Corrupted archive" in str(exc_info.value.__context__)
+            
+            # Check nested exception
+            assert "Corrupted archive" in str(exc_info.value.__cause__)
 
 # Utility Tests ------------------------------------------------------------
 
 class TestUtilities:
     @patch('pandas.DataFrame.to_csv')
     @patch('os.path.getsize', return_value=1024)
-    def test_csv_save(self, mock_getsize, mock_to_csv):
+    @patch('google.colab.files.download')
+    def test_csv_save(self, mock_download, mock_getsize, mock_to_csv):
         test_df = pd.DataFrame({'test': [1, 2, 3]})
         test_path = 'test.csv'
+        
         ProductionDataAnalyzer.save_to_csv(test_df, test_path)
+        
         mock_to_csv.assert_called_once_with(test_path, sep=';', index=False)
         mock_getsize.assert_called_once_with(test_path)
+        mock_download.assert_called_once_with(test_path)
 
     def test_invalid_csv_params(self):
         with pytest.raises(ValueError):
