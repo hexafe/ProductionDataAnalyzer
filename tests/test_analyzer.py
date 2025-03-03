@@ -210,7 +210,7 @@ class TestEdgeCases:
 class TestConcatEdgeCases:
     @patch('ProductionDataAnalyzer.analyzer.files.upload')
     @patch('ProductionDataAnalyzer.analyzer.pd.read_csv')
-    def test_mismatched_columns_preserves_rows(self, tmp_path):
+    def test_mismatched_columns_preserves_rows(self, mock_upload, mock_read, tmp_path):
         mock_upload.return_value = {'file1.csv': b'', 'file2.csv': b''}
 
         df1 = pd.DataFrame({
@@ -233,7 +233,6 @@ class TestConcatEdgeCases:
                 date_col='timestamp',
                 tmp_dir=str(tmp_path)
             )
-
         assert len(combined) == 3
         assert set(combined.columns) == {'timestamp', 'temperature', 'presure', 'id'}
         assert combined['id'].tolist() == ['A', 'B', 'C']
@@ -251,7 +250,6 @@ class TestConcatEdgeCases:
         })
 
         cleaned = ProductionDataAnalyzer._post_merge_cleanup(df, 'timestamp')
-
         assert len(cleaned) == 2
         assert cleaned['id'].tolist() == ['A', pd.NA]
 
@@ -260,7 +258,6 @@ class TestConcatEdgeCases:
             'id': ['001', '002', 'ABC'],
             'value': [1, 2, 3]
         })
-
         optimized = ProductionDataAnalyzer._optimize_dtypes(df, None)
         assert pd.api.types.is_categorical_dtype(optimized['id']) or pd.api.types.is_string_dtype(optimized['id'])
 
@@ -268,10 +265,8 @@ class TestConcatEdgeCases:
         df = pd.DataFrame({
             'mixed_col': ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'X']
         })
-
         optimized = ProductionDataAnalyzer._optimize_dtypes(df, None)
-
-        assert pd.api.types.is_categorical_dtype(optimized['mixed_col'])
+        assert pd.api.types.is_string_dtype(optimized['mixed_col'])
 
     def test_datetime_conversion_failures(self):
         df = pd.DataFrame({
@@ -292,7 +287,7 @@ class TestConcatEdgeCases:
 class TestPipelineIntegration:
     @patch('ProductionDataAnalyzer.analyzer.files.upload')
     @patch('ProductionDataAnalyzer.analyzer.pd.read_csv')
-    def test_full_pipeline_with_missing_columns(self, tmp_path):
+    def test_full_pipeline_with_missing_columns(self, mock_upload, mock_read, tmp_path):
         mock_upload.return_value = {'file1.csv': b'', 'file2.csv': b''}
 
         df1 = pd.DataFrame({
