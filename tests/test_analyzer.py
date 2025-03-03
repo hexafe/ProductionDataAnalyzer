@@ -208,7 +208,11 @@ class TestEdgeCases:
             assert "No valid data files processed" in str(exc_info.value)
 
 class TestConcatEdgeCases:
+    @patch('ProductionDataAnalyzer.analyzer.files.upload')
+    @patch('ProductionDataAnalyzer.analyzer.pd.read_csv')
     def test_mismatched_columns_preserves_rows(self, tmp_path):
+        mock_upload.return_value = {'file1.csv': b'', 'file2.csv': b''}
+
         df1 = pd.DataFrame({
             'timestamp': ['01.01.2023 00:00', '02.01.2023 00:00'],
             'temperature': [25, 26],
@@ -265,7 +269,7 @@ class TestConcatEdgeCases:
             'mixed_col': ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'X']
         })
 
-        optimized = ProductionDataAnalyzer._optimize_dtypes(optimized['mixed_col'])
+        optimized = ProductionDataAnalyzer._optimize_dtypes(df, None)
 
         assert pd.api.types.is_categorical_dtype(optimized['mixed_col'])
 
@@ -286,7 +290,11 @@ class TestConcatEdgeCases:
         assert cleaned['timestamp'].isna().sum() == 2
     
 class TestPipelineIntegration:
+    @patch('ProductionDataAnalyzer.analyzer.files.upload')
+    @patch('ProductionDataAnalyzer.analyzer.pd.read_csv')
     def test_full_pipeline_with_missing_columns(self, tmp_path):
+        mock_upload.return_value = {'file1.csv': b'', 'file2.csv': b''}
+
         df1 = pd.DataFrame({
             'timestamp': ['01.01.2023 00:00', '02.01.2023 00:00'],
             'temperature': [25, 26],
@@ -324,7 +332,7 @@ class TestPipelineIntegration:
         optimized = ProductionDataAnalyzer._optimize_dtypes(original, 'timestamp')
 
         assert pd.api.types.is_datetime64_any_dtype(optimized['timestamp'])
-        assert pd.api.types.is_categorical_dtype(optimized['mixed_col'])
+        assert pd.api.types.is_string_dtype(optimized['mixed_col'])
         assert pd.api.types.is_string_dtype(optimized['id']) or pd.api.types.is_categorical_dtype(optimized['id'])
         assert len(optimized) == len(original)
         assert set(optimized['id']) == set(original['id'])

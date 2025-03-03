@@ -308,6 +308,8 @@ class ProductionDataAnalyzer:
         Returns:
             pd.DataFrame: Cleaned and optimized DataFrame
         """
+        df = df.copy()
+        
         # Remove duplicate rows, keeping the first occurence
         df = df.drop_duplicates(keep='first')
         if date_col in df.columns:
