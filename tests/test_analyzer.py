@@ -228,10 +228,7 @@ class TestConcatEdgeCases:
             'id': ['C']
         })
         
-        mock_read.side_effect = [
-            (chunk for chunk in [df1]),
-            (chunk for chunk in [df2])
-        ]
+        mock_read.side_effect = [df1, df2]
         
         combined = ProductionDataAnalyzer.upload_files(
             date_col='timestamp',
@@ -309,10 +306,7 @@ class TestPipelineIntegration:
             'serial_no': ['C']
         })
         
-        mock_read.side_effect = [
-            (chunk for chunk in [df1]),
-            (chunk for chunk in [df2])
-        ]
+        mock_read.side_effect = [df1, df2]
         
         combined = ProductionDataAnalyzer.upload_files(
             date_col='timestamp',
