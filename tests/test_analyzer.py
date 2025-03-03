@@ -210,29 +210,35 @@ class TestEdgeCases:
 class TestConcatEdgeCases:
     @patch('ProductionDataAnalyzer.analyzer.files.upload')
     @patch('ProductionDataAnalyzer.analyzer.pd.read_csv')
-    def test_mismatched_columns_preserves_rows(self, mock_upload, mock_read, tmp_path):
+    def test_mismatched_columns_preserves_rows(self, mock_read, mock_upload, tmp_path):
         mock_upload.return_value = {
             'file1.csv': b'content',
             'file2.csv': b'content'
         }
-
+        
         df1 = pd.DataFrame({
             'timestamp': ['01.01.2023 00:00', '02.01.2023 00:00'],
             'temperature': [25, 26],
             'id': ['A', 'B']
         })
-
+        
         df2 = pd.DataFrame({
             'timestamp': ['03.01.2023 00:00'],
             'pressure': [100],
             'id': ['C']
         })
         
-        mock_read.side_effect = [df1, df2]
+        mock_read.side_effect = [
+            (chunk for chunk in [df1]),
+            (chunk for chunk in [df2])
+        ]
+        
         combined = ProductionDataAnalyzer.upload_files(
             date_col='timestamp',
-            tmp_dir=str(tmp_path)
+            tmp_dir=str(tmp_path),
+            chunksize=None
         )
+        
         assert len(combined) == 3
         assert set(combined.columns) == {'timestamp', 'temperature', 'pressure', 'id'}
 
@@ -285,29 +291,35 @@ class TestConcatEdgeCases:
 class TestPipelineIntegration:
     @patch('ProductionDataAnalyzer.analyzer.files.upload')
     @patch('ProductionDataAnalyzer.analyzer.pd.read_csv')
-    def test_full_pipeline_with_missing_columns(self, mock_upload, mock_read, tmp_path):
+    def test_full_pipeline_with_missing_columns(self, mock_read, mock_upload, tmp_path):
         mock_upload.return_value = {
             'file1.csv': b'content',
             'file2.csv': b'content'
         }
-
+        
         df1 = pd.DataFrame({
             'timestamp': ['01.01.2023 00:00', '02.01.2023 00:00'],
             'temperature': [25, 26],
             'part_id': ['A', 'B']
         })
-
+        
         df2 = pd.DataFrame({
             'timestamp': ['03.01.2023 00:00'],
             'pressure': [100],
             'serial_no': ['C']
         })
-
-        mock_read.side_effect = [df1, df2]
+        
+        mock_read.side_effect = [
+            (chunk for chunk in [df1]),
+            (chunk for chunk in [df2])
+        ]
+        
         combined = ProductionDataAnalyzer.upload_files(
             date_col='timestamp',
-            tmp_dir=str(tmp_path)
+            tmp_dir=str(tmp_path),
+            chunksize=None
         )
+        
         assert 'part_id' in combined.columns
         assert 'serial_no' in combined.columns
 
