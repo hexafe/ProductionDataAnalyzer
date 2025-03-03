@@ -207,6 +207,128 @@ class TestEdgeCases:
                 ProductionDataAnalyzer.upload_files(tmp_dir=str(tmp_path), archive_ext=('.zip',))
             assert "No valid data files processed" in str(exc_info.value)
 
+class TestConcatEdgeCases:
+    def test_mismatched_columns_preserves_rows(self, tmp_path):
+        df1 = pd.DataFrame({
+            'timestamp': ['01.01.2023 00:00', '02.01.2023 00:00'],
+            'temperature': [25, 26],
+            'id': ['A', 'B']
+        })
+
+        df2 = pd.DataFrame({
+            'timestamp': ['03.01.2023 00:00'],
+            'pressure': [100],
+            'id': ['C']
+        })
+        
+        dfs = [df1, df2]
+
+        with patch('ProductionDataAnalyzer.analyzer.pd.read_csv') as mock_read:
+            mock_read.side_effect = dfs
+            combined = ProductionDataAnalyzer.upload_files(
+                date_col='timestamp',
+                tmp_dir=str(tmp_path)
+            )
+
+        assert len(combined) == 3
+        assert set(combined.columns) == {'timestamp', 'temperature', 'presure', 'id'}
+        assert combined['id'].tolist() == ['A', 'B', 'C']
+        assert combined['pressure'].isna().sum() == 2
+
+    def test_duplicate_removal_criteria(self):
+        df = pd.DataFrame({
+            'timestamp': [
+                '01.01.2023 00:00',
+                '01.01.2023 00:00',
+                '02.01.2023 00:00'
+            ],
+            'value': [1, 1, 2],
+            'id': ['A', 'A', pd.NA]
+        })
+
+        cleaned = ProductionDataAnalyzer._post_merge_cleanup(df, 'timestamp')
+
+        assert len(cleaned) == 2
+        assert cleaned['id'].tolist() == ['A', pd.NA]
+
+    def test_numeric_id_conversion(self):
+        df = pd.DataFrame({
+            'id': ['001', '002', 'ABC'],
+            'value': [1, 2, 3]
+        })
+
+        optimized = ProductionDataAnalyzer._optimize_dtypes(df, None)
+        assert pd.api.types.is_categorical_dtype(optimized['id']) or pd.api.types.is_string_dtype(optimized['id'])
+
+    def test_partial_numeric_conversion(self):
+        df = pd.DataFrame({
+            'mixed_col': ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'X']
+        })
+
+        optimized = ProductionDataAnalyzer._optimize_dtypes(optimized['mixed_col'])
+
+        assert pd.api.types.is_categorical_dtype(optimized['mixed_col'])
+
+    def test_datetime_conversion_failures(self):
+        df = pd.DataFrame({
+            'timestamp': [
+                '01.01.2023 00:00',
+                '2023-01-02 12:00',
+                'invalid_date',
+                '04.01.2023 18:00'
+            ],
+            'value': [1, 2, 3, 4]
+        })
+
+        cleaned = ProductionDataAnalyzer._post_merge_cleanup(df, 'timestamp')
+
+        assert len(cleaned) == 4
+        assert cleaned['timestamp'].isna().sum() == 2
+    
+class TestPipelineIntegration:
+    def test_full_pipeline_with_missing_columns(self, tmp_path):
+        df1 = pd.DataFrame({
+            'timestamp': ['01.01.2023 00:00', '02.01.2023 00:00'],
+            'temperature': [25, 26],
+            'part_id': ['A', 'B']
+        })
+
+        df2 = pd.DataFrame({
+            'timestamp': ['03.01.2023 00:00'],
+            'pressure': [100],
+            'serial_no': ['C']
+        })
+
+        with patch('ProductionDataAnalyzer.analyzer.pd.read_csv') as mock_read:
+            mock_read.side_effect = [df1, df2]
+            combined = ProductionDataAnalyzer.upload_files(
+                date_col='timestamp',
+                tmp_dir=str(tmp_path)
+            )
+        assert len(combined) == 3
+        assert 'part_id' in combined.columns
+        assert 'serial_no' in combined.columns
+
+        reference_ids = pd.DataFrame({'part_id': ['A', 'C']})
+        with pytest.raises(KeyError):
+            ProductionDataAnalyzer.filter_by_id(
+                combined, reference_ids, 'part_id'
+            )
+
+    def test_dtype_optimization_roundtrip(self):
+        original = pd.DataFrame({
+            'timestamp': ['01.01.2023 00:00']*10,
+            'mixed_col': ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'X'],
+            'id': [f"ID_{i}" for i in range(10)]
+        })
+        optimized = ProductionDataAnalyzer._optimize_dtypes(original, 'timestamp')
+
+        assert pd.api.types.is_datetime64_any_dtype(optimized['timestamp'])
+        assert pd.api.types.is_categorical_dtype(optimized['mixed_col'])
+        assert pd.api.types.is_string_dtype(optimized['id']) or pd.api.types.is_categorical_dtype(optimized['id'])
+        assert len(optimized) == len(original)
+        assert set(optimized['id']) == set(original['id'])
+
 # Utility Tests ------------------------------------------------------------
 
 class TestUtilities:
