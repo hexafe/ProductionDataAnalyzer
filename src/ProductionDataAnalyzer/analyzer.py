@@ -1,10 +1,15 @@
-from typing import Union, Dict
+from typing import Union, Dict, List, Tuple
 import os
 import io
 import tempfile
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.express as px
+import plotly.figure_factory as ff
+import panel as pn
 import matplotlib.dates as mdates
 import gspread
 from google.colab import files, auth
@@ -309,7 +314,7 @@ class ProductionDataAnalyzer:
             pd.DataFrame: Cleaned and optimized DataFrame
         """
         df = df.copy()
-        
+
         # Remove duplicate rows, keeping the first occurence
         df = df.drop_duplicates(keep='first')
         if date_col in df.columns:
@@ -1234,3 +1239,321 @@ class ProductionDataAnalyzer:
             raise RuntimeError(
                 f"Limit storage failed: {str(e)}"
             ) from e
+
+    def generate_eda_report(self, sample_size: int = None) -> Dict:
+        """
+        Generate EDA report with interactive elements
+
+        Parameters:
+            sample_size (int, optional): Maximum number of samples to use for visualizations
+                Default: None - uses all available data
+
+        Returns:
+            Dict - containing:
+            - summary_stats: Statistical summary
+            - missing_data: Missing value analysis
+            - distribution_plots: Interactive distribution charts
+            - correlations: Correlation matrices
+            - temporal_trends: Interactive time series overview
+
+        Example:
+            >>> analyzer.generate_eda_report() # uses full dataset
+            >>> analyzer.generate_eda_report(5000) # uses 5000 samples
+
+        Note:
+            Full dataset analysis may impact performance with large datasets (>1M rows)
+        """
+        report = {
+            'summary_stats': self._get_summary_stats(),
+            'missing_data': self._analyze_missing_data(),
+            'distribution_plots': self.plot_features_distributions(sample_size),
+            'correlations': self.analyze_correlations(),
+            'temporal_trends': self.plot_interactive_timeline()
+        }
+        return report
+
+    def _get_summary_stats(self) -> pd.DataFrame:
+        """
+        Generate statistical summary for numeric parameters
+
+        Returns:
+            pd.DataFrame: Statistical summary with columns:
+                - count: Number of non-null values
+                - mean: Average value
+                - std: Standard deviation
+                - min: Minimum value
+                - 1%: 1st percentile
+                - 25%: 25th percentile (Q1)
+                - 50%: Median
+                - 75%: 75th percentile (Q3)
+                - 99%: 99th percentile
+                - max: Maximum value
+
+        Raises:
+            ValueError: If no numeric columns exist in dataset
+
+        Note:
+            Excludes non-numeric columns from calculations
+        """
+        numeric_cols = self.production.select_dtypes(include=np.number).columns
+        if not numeric_cols.empty:
+            return self.production[numeric_cols].describe(percentiles=[.01, .25, .5, .75, .99]).T
+        raise ValueError("No numeric columns found for statistical summary")
+
+    def _analyze_missing_data(self):
+        """
+        Analyze missing value patterns across dataset columns
+
+        Returns:
+            pd.DataFrame: Missing data analysis with columns:
+                - missing_count: Number of missing values
+                - missing_pct: Percentage of missing values
+                - data_type: Column data type
+                - unique_count: Number of unique values
+
+        Raises:
+            RuntimeError: If dataset contains no columns
+        """
+        if self.production.empty:
+            raise RuntimeError("Cannot analyze missing data - dataset is empty")
+            
+        missing = self.production.isna().sum().to_frame('missing_count')
+        missing['missing_pct'] = missing['missing_count'] / len(self.production)
+        missing['data_type'] = self.production.dtypes
+        missing['unique_count'] = self.production.nunique()
+        return missing.sort_values('missing_pct', ascending=False)
+
+    def plot_feature_distributions(self, sample_size: int = None) -> go.Figure:
+        """
+        Create interactive distribution plots with statistical summary table
+
+        Parameters:
+            sample_size (int, optional): Number of samples to plot. 
+                                       If None, uses all data (default: None)
+
+        Returns:
+            go.Figure: Plotly Figure containing:
+                - Histogram and box plot for each numeric parameter
+                - Statistical summary table with:
+                    * Basic statistics (min, max, mean, std)
+                    * Process capability metrics (if limits defined)
+                    * Defect rate calculations
+
+        Raises:
+            ValueError: If no numeric columns found for visualization
+        """
+        numeric_cols = self.production.select_dtypes(include=np.number).columns.tolist()
+        if not numeric_cols:
+            raise ValueError("No numeric columns found for distribution plots")
+
+        df = self.production if sample_size is None else self.production.sample(min(sample_size, len(self.production)))
+
+        fig = make_subplots(
+            rows=len(numeric_cols), cols=3,
+            column_widths=[0.4, 0.4, 0.2],
+            specs=[[{"type": "histogram"}, {"type": "box"}, {"type": "table"}]] * len(numeric_cols),
+            subplot_titles=[f"{col} Distribution" for col in numeric_cols]
+        )
+
+        for i, col in enumerate(numeric_cols, 1):
+            fig.add_trace(go.Histogram(x=df[col], name=col), row=i, col=1)
+            fig.add_trace(go.Box(x=df[col], name=col), row=i, col=2)
+            
+            stats = self._calculate_feature_stats(df, col)
+            fig.add_trace(
+                go.Table(
+                    header=dict(values=["Metric", "Value"]),
+                    cells=dict(values=[list(stats.keys()), list(stats.values())])
+                ),
+                row=i, col=3
+            )
+
+        fig.update_layout(
+            height=400*len(numeric_cols),
+            showlegend=False,
+            title_text="Feature Distributions with Statistical Summary"
+        )
+        return fig
+
+    def _calculate_feature_stats(self, df: pd.DataFrame, col: str) -> Dict:
+        """Calculate comprehensive statistics for a feature"""
+        stats = {
+            'Count': df[col].count(),
+            'Min': df[col].min(),
+            'Max': df[col].max(),
+            'Mean': df[col].mean(),
+            'Std Dev': df[col].std()
+        }
+
+        if col in self.param_limits:
+            lsl, usl = self.param_limits[col]
+            specs = {
+                'LSL': lsl,
+                'USL': usl,
+                'Defects': ((df[col] < lsl) | (df[col] > usl)).sum(),
+                '% Defects': ((df[col] < lsl) | (df[col] > usl)).mean() * 100
+            }
+            
+            # Process capability calculations
+            sigma = df[col].std()
+            if sigma > 0:
+                pp = (usl - lsl) / (6 * sigma)
+                ppu = (usl - df[col].mean()) / (3 * sigma)
+                ppl = (df[col].mean() - lsl) / (3 * sigma)
+                ppk = min(ppu, ppl)
+                specs.update({'Pp': pp, 'Ppk': ppk})
+            
+            stats.update(specs)
+
+        return {k: round(v, 4) if isinstance(v, float) else v for k, v in stats.items()}
+    
+    def analyze_correlations(self) -> Dict:
+        """
+        Calculate and visualize correlation matrices using multiple methods
+
+        Returns:
+            Dict: Contains:
+                - pearson: Pearson correlation matrix
+                - spearman: Spearman rank correlation matrix  
+                - kendall: Kendall's tau correlation matrix
+                - plot: Interactive heatmap visualization
+
+        Raises:
+            ValueError: If insufficient numeric columns for correlation analysis
+
+        Example:
+            >>> correlations = analyzer.analyze_correlations()
+            >>> correlations['plot'].show()
+        """
+        numeric_df = self.production.select_dtypes(include=np.number)
+        if len(numeric_df.columns) < 2:
+            raise ValueError("Need at least 2 numeric columns for correlation analysis")
+
+        corr_data = {
+            'pearson': numeric_df.corr(),
+            'spearman': numeric_df.corr(method='spearman'),
+            'kendall': numeric_df.corr(method='kendall')
+        }
+
+        fig = px.imshow(corr_data['pearson'],
+                        x=corr_data['pearson'].columns,
+                        y=corr_data['pearson'].columns,
+                        color_continuous_scale='RdBu_r',
+                        zmin=-1,
+                        zmax=1,
+                        title="Pearson Correlation Matrix")
+        
+        corr_data['plot'] = fig
+        return corr_data
+    
+    def plot_interactive_timeline(self, parameters: List[str] = None) -> go.Figure:
+        """
+        Create interactive time series visualization with multiple parameters
+
+        Parameters:
+            parameters (List[str]): List of parameters to visualize. 
+                                  Default: all numeric parameters
+
+        Returns:
+            go.Figure: Interactive Plotly figure with:
+                - Time series lines for selected parameters
+                - Control limit annotations (if defined)
+                - Range selector and hover tooltip
+                - Multiple y-axis support
+
+        Raises:
+            ValueError: If date column not configured or invalid parameters specified
+        """
+        if not self.date_col:
+            raise ValueError("Time series visualization requires date column configuration")
+
+        params = parameters or self.selected_params
+        invalid_params = set(params) - set(self.production.columns)
+        if invalid_params:
+            raise ValueError(f"Invalid parameters specified: {invalid_params}")
+
+        df = self.production.set_index(self.date_col)
+        fig = px.line(df, x=df.index, y=params, title="Production Parameters Timeline")
+
+        for param in params:
+            if param in self.param_limits:
+                lower, upper = self.param_limits[param]
+                fig.add_hline(y=lower, line_dash="dot", line_color="red",
+                            annotation_text=f"{param} LSL")
+                fig.add_hline(y=upper, line_dash="dot", line_color="red",
+                            annotation_text=f"{param} USL")
+
+        fig.update_layout(
+            xaxis_title="Time",
+            yaxis_title="Parameter Values",
+            hovermode="x unified",
+            legend_title="Parameters",
+            xaxis_rangeslider_visible=True
+        )
+        return fig
+
+    def create_interactive_dashboard(self) -> None:
+        """
+        Launch an interactive dashboard for data exploration
+
+        Returns:
+            pn.Column: Panel dashboard containing:
+                - Parameter selection widget
+                - Aggregation level control
+                - Interactive timeline visualization
+                - Correlation matrix selector
+
+        Raises:
+            RuntimeError: If not running in Jupyter environment
+
+        Note:
+            Requires Jupyter notebook/lab or Google Colab environment
+            Call pn.extension() before using in notebook
+        """
+        try:
+            import panel as pn
+            pn.extension()
+        except ImportError:
+            raise RuntimeError("Panel library required for dashboard functionality")
+
+        # Create widgets
+        param_selector = pn.widgets.MultiSelect(
+            name="Parameters", options=self.selected_params, size=8
+        )
+        aggregation_selector = pn.widgets.Select(
+            name="Aggregation", options=['raw', 'hourly', 'daily', 'weekly'], width=200
+        )
+        corr_method_selector = pn.widgets.Select(
+            name="Correlation Method", options=['pearson', 'spearman', 'kendall'], width=200
+        )
+
+        # Create reactive components
+        @pn.depends(param_selector.param.value, aggregation_selector.param.value)
+        def timeline_plot(params, agg):
+            if agg != 'raw':
+                self.aggregate_data(period=agg)
+                df = self.daily_data
+            else:
+                df = self.production
+            return self.plot_interactive_timeline(parameters=params)
+
+        @pn.depends(param_selector.param.value, corr_method_selector.param.value)
+        def correlation_plot(params, method):
+            if len(params) < 2:
+                return pn.pane.Markdown("Select at least 2 parameters for correlation")
+            try:
+                corr_data = self.analyze_correlations()
+                return corr_data['plot']
+            except ValueError as e:
+                return pn.pane.Alert(str(e), alert_type="warning")
+
+        # Compose dashboard
+        return pn.Column(
+            pn.Row(
+                pn.Column(param_selector, aggregation_selector, corr_method_selector),
+                pn.Tabs(
+                    ("Timeline", timeline_plot),
+                    ("Correlations", correlation_plot)
+                )
+            )
+        )
