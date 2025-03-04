@@ -33,24 +33,27 @@ Production data analysis toolkit with integrated quality analytics
 
 ### Google Colab
 ```python
-!git clone https://github.com/hexafe/ProductionDataAnalyzer.git
-%cd ProductionDataAnalyzer
+!git clone -b testing https://github.com/hexafe/ProductionDataAnalyzer.git
+%cd /content/ProductionDataAnalyzer
 !pip install -r requirements.txt
-from ProductionDataAnalyzer import ProductionDataAnalyzer
-%cd ..
+%cd /content/ProductionDataAnalyzer/src/ProductionDataAnalyzer/
+from analyzer import ProductionDataAnalyzer
 ```
 
 ## Basic workflow
 ### Upload and read data from local CSV/Excel (or zip CSV/Excel) file(s)
 ```python
-df = ProductionDataAnalyzer.upload_files(date_col='timestamp')
+df = ProductionDataAnalyzer.upload_files(
+    date_col='timestamp', # Format as datetime and sort by timestamp column
+    id_cols=['part_id']  # Maintains string dtype for 'part_id' column
+)
 ```
 
 ### Initialize with production data
 ```python
 analyzer = ProductionDataAnalyzer(
     production_data=df,
-    date_col='timestamp'
+    date_col='timestamp',
 )
 ```
 
@@ -94,8 +97,8 @@ analyzer.set_parameter_limits(source=limits_dict)
 
 ## Data filtering by id list in CSV/Excel file (Google Sheets and list to be added)
 ```python
-data_df = ProductionDataAnalyzer.upload_files()
-ids_df = ProductionDataAnalyzer.upload_files()
+data_df = ProductionDataAnalyzer.upload_files(id_cols=['part_id'])
+ids_df = ProductionDataAnalyzer.upload_files(id_cols=['part_id'])
 filtered_data = ProductionDataAnalyzer.filter_by_id(
     production_data_df=data_df,
     id_data_df=ids_df,
@@ -114,3 +117,15 @@ ProductionDataAnalyzer.save_to_csv(df=filtered_data, filename="filtered_data.csv
 ```set_parameter_limits()```: Quality limit configuration
 
 ```save_to_csv()```: Data export with formatting
+
+```save_aggregated_data()```: Aggregated data export with formatting
+
+```generate_eda_report()```: Generate EDA report with interactive elements
+
+```plot_feature_distributions()```: Create interactive distribution plots with statistical summary table
+
+```analyze_correlations()```: Calculate and visualize correlation matrices using multiple methods
+
+```plot_interactive_timeline()```: Create interactive time series visualization with multiple parameters
+
+```create_interactive_dashboard()```: Launch an interactive dashboard for data exploration
