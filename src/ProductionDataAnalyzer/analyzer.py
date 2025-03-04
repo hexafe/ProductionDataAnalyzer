@@ -97,7 +97,11 @@ class ProductionDataAnalyzer:
     ...     update_strategy='dynamic_retrain'
     ... )
     """
-    def __init__(self, production_data: pd.DataFrame, date_col: str = None):
+    def __init__(
+        self,
+        production_data: pd.DataFrame,
+        date_col: str = None
+    ):
         """
         Initialize a production data analyzer with raw data and configuration
 
@@ -105,6 +109,7 @@ class ProductionDataAnalyzer:
             production_data (pd.DataFrame): Input data containing production records
                                             Must contain a datetime column and various parameters to analyze
             date_col (str):                 Name of the datetime column used for temporal analysis
+                                            Default: None - class can manage data without datetime column
 
         Raises:
             TypeError:  If input data is not a pandas DataFrame
@@ -138,7 +143,7 @@ class ProductionDataAnalyzer:
 
         # Core attributes
         self.date_col = date_col
-        self.production = production_data
+        self.production = production_data.copy()
         self.agg_data = pd.DataFrame()
         self.param_limits = {}
 
@@ -158,6 +163,7 @@ class ProductionDataAnalyzer:
     @staticmethod
     def upload_files(
         date_col: str = None,
+        id_cols: List[str] = None,
         csv_kwargs: dict = None,
         excel_kwargs: dict = None,
         archive_ext: tuple = ('.zip', '.7z', '.rar', '.tar', '.gz'),
@@ -175,6 +181,7 @@ class ProductionDataAnalyzer:
 
         Parameters:
             date_col (str):         Name of the column to parse as datetime
+            id_cols (List[str]):    List of names for ID columns to preserve as strings
             csv_kwargs (dict):      Optional parameters for pd.read_csv
                                     Default: {'sep': ';', 'decimal': ',', 'parse_dates': [date_col],
                                               'dayfirst': True, 'na_values': ['\\N', '']}
@@ -213,6 +220,11 @@ class ProductionDataAnalyzer:
             default_csv_kwargs['date_parser'] = lambda x: pd.to_datetime(
                 x, format='%d.%m.%Y %H:%M', errors='coerce'
             )
+        if id_cols:
+            csv_kwargs['dtype'] = {
+                **csv_kwargs.get('dtype', {}),
+                **{col: str for col in id_cols}
+            }
 
         csv_kwargs = {**default_csv_kwargs, **(csv_kwargs or {})}
 
@@ -255,6 +267,10 @@ class ProductionDataAnalyzer:
                     # Process Excel files
                     elif any(lower_fn.endswith(ext) for ext in excel_ext):
                         df = pd.read_excel(io.BytesIO(content), **excel_kwargs)
+                        if id_cols:
+                            for col in id_cols:
+                                if col in df.columns:
+                                    df[col] = df[col].astype(str)
                         dfs.append(df)
                         print(f"Processed Excel directly: {fn}")
                 except Exception as e:
@@ -276,6 +292,10 @@ class ProductionDataAnalyzer:
                             print(f"Processed extracted CSV: {extracted_file.name}")
                         elif lower_suffix in excel_ext:
                             df = pd.read_excel(extracted_file, **excel_kwargs)
+                            if od_cols:
+                                for col in id_cols:
+                                    if col in df.columns:
+                                        df[col] = df[col].astype(str)
                             dfs.append(df)
                             print(f"Processed extracted Excel: {extracted_file.name}")
                     except Exception as e:
@@ -295,10 +315,10 @@ class ProductionDataAnalyzer:
             )
 
         combined = pd.concat(dfs, ignore_index=True)
-        return ProductionDataAnalyzer._post_merge_cleanup(combined, date_col)
+        return ProductionDataAnalyzer._post_merge_cleanup(combined, date_col, id_cols)
 
     @staticmethod
-    def _post_merge_cleanup(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
+    def _post_merge_cleanup(df: pd.DataFrame, date_col: str, id_cols: List[str]) -> pd.DataFrame:
         """
         Perform cleanup on the combined DataFrame:
           - Remove duplicate rows
@@ -307,8 +327,9 @@ class ProductionDataAnalyzer:
           - Optimize data types to reduce memory usage
 
         Parameters:
-            df (pd.DataFrame): Combined DataFrame
-            date_col (str):    Name of the date column
+            df (pd.DataFrame):      Combined DataFrame
+            date_col (str):         Name of the date column
+            id_cols (List[str]):    List of names for ID columns to preserve as strings
 
         Returns:
             pd.DataFrame: Cleaned and optimized DataFrame
@@ -327,7 +348,7 @@ class ProductionDataAnalyzer:
             # Sort by the date column and reset index
             df = df.sort_values(date_col).reset_index(drop=True)
         # Optimize data types for memory efficiency
-        return ProductionDataAnalyzer._optimize_dtypes(df, date_col)
+        return ProductionDataAnalyzer._optimize_dtypes(df, date_col, id_cols)
 
     @staticmethod
     def _optimize_dtypes(
@@ -342,6 +363,7 @@ class ProductionDataAnalyzer:
         Parameters:
             df (pd.DataFrame):              DataFrame to optimize
             date_col (str):                 Name of the date column
+            id_cols (List[str]):            List of names for ID columns to preserve as strings
             numeric_threshold (float):      Proportion of unique values to consider numeric
             categorical_threshold (float):  Proportion of unique values to consider categorical
 
@@ -359,6 +381,8 @@ class ProductionDataAnalyzer:
                     format='%d.%m.%Y %H:%M',
                     errors='coerce'
                 )
+                continue
+            if col in id_cols:
                 continue
 
             # Process object/string columns
