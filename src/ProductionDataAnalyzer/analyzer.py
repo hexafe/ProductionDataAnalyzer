@@ -166,20 +166,34 @@ class ProductionDataAnalyzer:
         Datetime parser with multiple fallback strategies
         """
         formats = [
-            '%Y-%m-%d %H:%M:%S',    # ISO format
-            '%d.%m.%Y %H:%M',       # European-style
-            '%m/%d/%Y %I:%M %p',    # US with AM/PM
-            '%Y-%m-%d',             # Date only
-            '%d-%b-%Y %H:%M',       # 01-Jan-2023 style
-            '%Y%m%d%H%M%S'          # Compact numeric
+            # ISO variants
+            '%Y-%m-%d %H:%M:%S.%f',    # 2023-07-17 14:30:45.123
+            '%Y-%m-%dT%H:%M:%S.%fZ',   # ISO with timezone
+            '%Y%m%d%H%M%S',            # 20230717143045
+            
+            # European-style with various separators
+            '%d.%m.%Y %H:%M:%S',       # 17.07.2023 14:30:45
+            '%d/%m/%Y %H:%M',          # 17/07/2023 14:30
+            
+            # US-style formats
+            '%m/%d/%Y %I:%M %p',       # 7/17/2023 02:30 PM
+            '%b %d, %Y %H:%M',         # Jul 17, 2023 14:30
+            
+            # Fallback formats
+            '%Y-%m-%d',                # Date-only
+            '%H:%M:%S %d-%b-%Y'        # 14:30:45 17-Jul-2023
         ]
 
         for fmt in formats:
             try:
-                return pd.to_datetime(date_str, format=fmt, errors='raise')
+                return pd.to_datetime(date_str, format=fmt, exact=True)
             except:
                 continue
-        return pd.to_datetime(date_str, errors='coerce')
+                
+        try:
+            return pd.to_datetime(date_str, dayfirst=False, yearfirst=False)
+        except:
+            return pd.NaT
         
     @staticmethod
     def upload_files(
@@ -365,13 +379,23 @@ class ProductionDataAnalyzer:
         # Remove duplicate rows, keeping the first occurence
         df = df.drop_duplicates(keep='first')
         if date_col:
-            if date_col in df.columns:
-                df[date_col] = df[date_col].apply(ProductionDataAnalyzer._datetime_converter)
-                if df[date_col].isna().all():
-                    raise ValueError(f"All values in date column '{date_col}' are null after parsing")
-                # Sort by the date column and reset index
-                df = df.sort_values(date_col).reset_index(drop=True)
-            # Optimize data types for memory efficiency
+            # Convert while preserving original data
+            original_dates = df[date_col].copy()
+            df[date_col] = df[date_col].apply(ProductionDataAnalyzer._datetime_converter)
+            
+            # Validation with helpful error message
+            na_count = df[date_col].isna().sum()
+            if na_count == len(df):
+                invalid_samples = original_dates.head(3).tolist()
+                raise ValueError(
+                    f"All {len(df)} timestamp values invalid. "
+                    f"First 3 examples: {invalid_samples}\n"
+                    "Please verify date formats match supported patterns."
+                )
+            elif na_count > 0:
+                print(f"Warning: {na_count}/{len(df)} timestamps couldn't be parsed")
+                
+            df = df.sort_values(date_col).reset_index(drop=True)
         return ProductionDataAnalyzer._optimize_dtypes(df, date_col, id_cols)
 
     @staticmethod
@@ -401,11 +425,6 @@ class ProductionDataAnalyzer:
         for col in df.columns:
             # Process the date column
             if col == date_col:
-                df[col] = pd.to_datetime(
-                    df[col],
-                    format='%d.%m.%Y %H:%M',
-                    errors='coerce'
-                )
                 continue
             if id_cols:
                 if col in id_cols:
