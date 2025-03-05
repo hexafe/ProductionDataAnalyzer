@@ -161,6 +161,27 @@ class ProductionDataAnalyzer:
         print(f"Analyzer initialized with {len(self.production):,} records ({len(self.selected_params)} parameters)")
 
     @staticmethod
+    def _datetime_converter(date_str):
+        """
+        Datetime parser with multiple fallback strategies
+        """
+        formats = [
+            '%Y-%m-%d %H:%M:%S',    # ISO format
+            '%d.%m.%Y %H:%M',       # European-style
+            '%m/%d/%Y %I:%M %p',    # US with AM/PM
+            '%Y-%m-%d',             # Date only
+            '%d-%b-%Y %H:%M',       # 01-Jan-2023 style
+            '%Y%m%d%H%M%S'          # Compact numeric
+        ]
+
+        for fmt in formats:
+            try:
+                return pd.to_datetime(date_str, format=fmt, errors='raise')
+            except:
+                continue
+        return pd.to_datetime(date_str, errors='coerce')
+        
+    @staticmethod
     def upload_files(
         date_col: str = None,
         id_cols: List[str] = None,
@@ -211,9 +232,10 @@ class ProductionDataAnalyzer:
         default_csv_kwargs = {
             'sep': ';',
             'decimal': ',',
-            'parse_dates': bool(date_col),
-            #'dayfirst': False,
-            'na_values': ['\\N', '']
+            'parse_dates': False,
+            'dtype': {date_col: str} if date_col else None,
+            'na_values': ['\\N', ''],
+            'keep_default_na': False
         }
         if date_col:
             default_csv_kwargs['parse_dates'] = [date_col]
@@ -341,16 +363,14 @@ class ProductionDataAnalyzer:
 
         # Remove duplicate rows, keeping the first occurence
         df = df.drop_duplicates(keep='first')
-        if date_col in df.columns:
-            # Ensure the date column is parsed as datetime
-            df[date_col] = pd.to_datetime(
-                df[date_col],
-                format='%d.%m.%Y %H:%M',
-                errors='coerce'
-            )
-            # Sort by the date column and reset index
-            df = df.sort_values(date_col).reset_index(drop=True)
-        # Optimize data types for memory efficiency
+        if date_col:
+            if date_col in df.columns:
+                df[date_col] = df[date_col].apply(ProductionDataAnalyzer._datetime_converter)
+                if df[date_col].isna().all():
+                    raise ValueError(f"All values in date column '{date_col}' are null after parsing")
+                # Sort by the date column and reset index
+                df = df.sort_values(date_col).reset_index(drop=True)
+            # Optimize data types for memory efficiency
         return ProductionDataAnalyzer._optimize_dtypes(df, date_col, id_cols)
 
     @staticmethod
