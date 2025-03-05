@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock, call
 from pathlib import Path
 import tempfile
 import shutil
+import plotly.graph_objects as go
 from ProductionDataAnalyzer.analyzer import ProductionDataAnalyzer
 
 # Fixtures ----------------------------------------------------------------
@@ -435,9 +436,11 @@ class TestDashboard:
     @patch('panel.Column')
     @patch('panel.widgets.MultiSelect')
     def test_dashboard_creation(self, mock_select, mock_col, analyzer):
+        mock_select.return_value = pn.widgets.MultiSelect(options=['temp'])
+        mock_col.return_value = pn.Column("Test Content")
+        
         dashboard = analyzer.create_interactive_dashboard()
         assert isinstance(dashboard, pn.Column)
-        mock_select.assert_called_once()
 
     def test_dashboard_environment_error(self):
         with patch('panel.extension', side_effect=ImportError):

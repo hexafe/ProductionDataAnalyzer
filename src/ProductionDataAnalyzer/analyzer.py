@@ -1130,11 +1130,13 @@ class ProductionDataAnalyzer:
             return df.set_index('parameter')[['LSL', 'USL']].apply(tuple, axis=1).to_dict()
 
         except KeyError as ke:
-            raise RecursionError(f"Column access error: {str(ke)}") from ke
+            raise ke
         except pd.errors.ParserError as pe:
-            raise ValueError(f"Data parsing failed: {str(pe)}") from pe
+            raise pe
+        except (ValueError, TypeError) as e:
+            raise e
         except Exception as e:
-            raise RuntimeError(f"Data processing failed: {str(e)}") from e
+            raise RuntimeError(f"Unexpected processing error: {str(e)}") from e
 
     def _validate_and_store_limits(self, new_limits: Dict) -> None:
         """
@@ -1295,7 +1297,7 @@ class ProductionDataAnalyzer:
         report = {
             'summary_stats': self._get_summary_stats(),
             'missing_data': self._analyze_missing_data(),
-            'distribution_plots': self.plot_features_distributions(sample_size),
+            'distribution_plots': self.plot_feature_distributions(sample_size),
             'correlations': self.analyze_correlations(),
             'temporal_trends': self.plot_interactive_timeline()
         }
