@@ -356,6 +356,128 @@ class TestUtilities:
                 pd.DataFrame(), 'invalid.txt'
             )
 
+class TestEDAGeneration:
+    def test_generate_eda_report_structure(self, analyzer):
+        report = analyzer.generate_eda_report()
+        assert isinstance(report, dict)
+        assert 'summary_stats' in report
+        assert 'missing_data' in report
+        assert 'distribution_plots' in report
+        assert 'correlations' in report
+        assert 'temporal_trends' in report
+
+    def test_eda_report_with_sampling(self, analyzer):
+        report = analyzer.generate_eda_report(sample_size=50)
+        assert len(report['distribution_plots'].data) > 0  # At least one trace
+
+    def test_summary_stats_content(self, analyzer):
+        stats = analyzer._get_summary_stats()
+        assert not stats.empty
+        assert all(col in stats.columns for col in ['mean', 'std', 'min', 'max'])
+
+    def test_summary_stats_no_numeric(self):
+        df = pd.DataFrame({'category': ['A', 'B', 'C']})
+        analyzer = ProductionDataAnalyzer(df)
+        with pytest.raises(ValueError):
+            analyzer._get_summary_stats()
+
+    def test_missing_data_analysis(self, analyzer):
+        missing_df = analyzer._analyze_missing_data()
+        assert not missing_df.empty
+        assert 'missing_pct' in missing_df.columns
+        assert missing_df['missing_pct'].between(0, 1).all()
+
+    def test_missing_data_empty_input(self):
+        empty_df = pd.DataFrame()
+        analyzer = ProductionDataAnalyzer(empty_df)
+        with pytest.raises(RuntimeError):
+            analyzer._analyze_missing_data()
+
+class TestVisualizations:
+    def test_feature_distribution_plot(self, analyzer):
+        fig = analyzer.plot_feature_distributions()
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) >= 2  # At least histogram and box plot
+
+    def test_feature_stats_calculation(self, analyzer, limits_dict):
+        analyzer.set_parameter_limits(limits_dict)
+        stats = analyzer._calculate_feature_stats(analyzer.production, 'temperature')
+        assert 'Defects' in stats
+        assert 'Ppk' in stats
+
+    def test_correlation_analysis(self, analyzer):
+        corr_data = analyzer.analyze_correlations()
+        assert 'pearson' in corr_data
+        assert isinstance(corr_data['plot'], go.Figure)
+
+    def test_correlation_insufficient_columns(self):
+        df = pd.DataFrame({'col1': [1, 2, 3]})
+        analyzer = ProductionDataAnalyzer(df)
+        with pytest.raises(ValueError):
+            analyzer.analyze_correlations()
+
+    def test_timeline_plot(self, analyzer):
+        fig = analyzer.plot_interactive_timeline(['temperature'])
+        assert len(fig.data) >= 1
+        assert any(trace.name == 'temperature' for trace in fig.data)
+
+    def test_timeline_invalid_params(self, analyzer):
+        with pytest.raises(ValueError):
+            analyzer.plot_interactive_timeline(['invalid_param'])
+
+    def test_timeline_missing_date_col(self):
+        df = pd.DataFrame({'value': [1, 2, 3]})
+        analyzer = ProductionDataAnalyzer(df)
+        with pytest.raises(ValueError):
+            analyzer.plot_interactive_timeline()
+
+class TestDashboard:
+    @patch('panel.Column')
+    @patch('panel.widgets.MultiSelect')
+    def test_dashboard_creation(self, mock_select, mock_col, analyzer):
+        dashboard = analyzer.create_interactive_dashboard()
+        assert isinstance(dashboard, pn.Column)
+        mock_select.assert_called_once()
+
+    def test_dashboard_environment_error(self):
+        with patch('panel.extension', side_effect=ImportError):
+            with pytest.raises(RuntimeError):
+                analyzer = ProductionDataAnalyzer(pd.DataFrame())
+                analyzer.create_interactive_dashboard()
+
+class TestDataFrameProcessing:
+    def test_dataframe_limit_processing(self, analyzer):
+        limits_df = pd.DataFrame({
+            'parameter': ['temperature', 'pressure'],
+            'LSL': [40, 90],
+            'USL': [60, 110]
+        })
+        result = analyzer._process_dataframe_source(limits_df)
+        assert result == {'temperature': (40, 60), 'pressure': (90, 110)}
+
+    def test_invalid_dataframe_columns(self, analyzer):
+        invalid_df = pd.DataFrame({'wrong_col': [1, 2]})
+        with pytest.raises(ValueError):
+            analyzer._process_dataframe_source(invalid_df)
+
+    def test_duplicate_parameters(self, analyzer):
+        dup_df = pd.DataFrame({
+            'parameter': ['temp', 'temp'],
+            'LSL': [10, 20],
+            'USL': [30, 40]
+        })
+        with pytest.raises(ValueError):
+            analyzer._process_dataframe_source(dup_df)
+
+    def test_non_numeric_limits(self, analyzer):
+        str_df = pd.DataFrame({
+            'parameter': ['temp'],
+            'LSL': ['low'],
+            'USL': ['high']
+        })
+        with pytest.raises(TypeError):
+            analyzer._process_dataframe_source(str_df)
+
 # Main ---------------------------------------------------------------------
 
 if __name__ == "__main__":
