@@ -357,6 +357,7 @@ class ProductionDataAnalyzer:
     def _optimize_dtypes(
         df: pd.DataFrame,
         date_col: str,
+        id_cols: List[str],
         numeric_threshold: float = 0.95,
         categorical_threshold: float = 0.1
     ) -> pd.DataFrame:
