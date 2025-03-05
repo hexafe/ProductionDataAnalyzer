@@ -70,7 +70,7 @@ class TestFileUpload:
     def test_post_merge_cleanup(self, sample_data):
         duplicated = pd.concat([sample_data, sample_data])
         cleaned = ProductionDataAnalyzer._post_merge_cleanup(
-            duplicated, 'timestamp'
+            duplicated, 'timestamp', None
         )
         assert len(cleaned) == len(sample_data)
         assert pd.api.types.is_datetime64_any_dtype(cleaned['timestamp'])
@@ -81,7 +81,7 @@ class TestFileUpload:
             'category': ['A'] * 10,
             'float': range(10)
         })
-        optimized = ProductionDataAnalyzer._optimize_dtypes(test_df, None)
+        optimized = ProductionDataAnalyzer._optimize_dtypes(test_df, None, None)
         assert pd.api.types.is_integer_dtype(optimized['str_num'])
         assert pd.api.types.is_categorical_dtype(optimized['category'])
 
@@ -250,7 +250,7 @@ class TestConcatEdgeCases:
             'id': ['A', 'A', pd.NA]
         })
 
-        cleaned = ProductionDataAnalyzer._post_merge_cleanup(df, 'timestamp')
+        cleaned = ProductionDataAnalyzer._post_merge_cleanup(df, 'timestamp', None)
         assert len(cleaned) == 2
         assert cleaned['id'].tolist() == ['A', pd.NA]
 
@@ -259,14 +259,14 @@ class TestConcatEdgeCases:
             'id': ['001', '002', 'ABC'],
             'value': [1, 2, 3]
         })
-        optimized = ProductionDataAnalyzer._optimize_dtypes(df, None)
+        optimized = ProductionDataAnalyzer._optimize_dtypes(df, None, None)
         assert pd.api.types.is_categorical_dtype(optimized['id']) or pd.api.types.is_string_dtype(optimized['id'])
 
     def test_partial_numeric_conversion(self):
         df = pd.DataFrame({
             'mixed_col': ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'X']
         })
-        optimized = ProductionDataAnalyzer._optimize_dtypes(df, None)
+        optimized = ProductionDataAnalyzer._optimize_dtypes(df, None, None)
         assert pd.api.types.is_string_dtype(optimized['mixed_col'])
 
     def test_datetime_conversion_failures(self):
@@ -280,7 +280,7 @@ class TestConcatEdgeCases:
             'value': [1, 2, 3, 4]
         })
 
-        cleaned = ProductionDataAnalyzer._post_merge_cleanup(df, 'timestamp')
+        cleaned = ProductionDataAnalyzer._post_merge_cleanup(df, 'timestamp', None)
 
         assert len(cleaned) == 4
         assert cleaned['timestamp'].isna().sum() == 2
@@ -323,7 +323,7 @@ class TestPipelineIntegration:
             'mixed_col': ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'X'],
             'id': [f"ID_{i}" for i in range(10)]
         })
-        optimized = ProductionDataAnalyzer._optimize_dtypes(original, 'timestamp')
+        optimized = ProductionDataAnalyzer._optimize_dtypes(original, 'timestamp', None)
 
         assert pd.api.types.is_datetime64_any_dtype(optimized['timestamp'])
         assert pd.api.types.is_string_dtype(optimized['mixed_col'])
