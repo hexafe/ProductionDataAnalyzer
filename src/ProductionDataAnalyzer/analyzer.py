@@ -1551,7 +1551,10 @@ class ProductionDataAnalyzer:
         except ImportError:
             raise RuntimeError("Panel library required for dashboard functionality")
 
-        numeric_params = self.production.select_dtypes(include=np.number).columns.tolist()
+        numeric_params = [
+            col for col in self.production.select_dtypes(include=np.number).columns 
+            if col != self.date_col
+        ]
         
         param_selector = pn.widgets.MultiSelect(
             name="Parameters",

@@ -438,20 +438,20 @@ class TestDashboard:
     @patch('panel.Column')
     @patch('panel.widgets.MultiSelect')
     def test_dashboard_creation(self, mock_select, mock_col, analyzer):
-        expected_params = ['temperature', 'pressure']
-        
-        mock_select.return_value = pn.widgets.MultiSelect(
+        real_widget = MultiSelect(
             name='Parameters',
-            options=expected_params,
+            options=['temperature', 'pressure'],
             size=8
         )
-        mock_col.return_value = pn.Column()
+        
+        mock_select.return_value = real_widget
+        mock_col.return_value = pn.Column(real_widget)
         
         analyzer.create_interactive_dashboard()
         
         mock_select.assert_called_once_with(
             name='Parameters',
-            options=expected_params,
+            options=['temperature', 'pressure'],
             size=8
         )
 
