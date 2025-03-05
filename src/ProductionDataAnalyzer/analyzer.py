@@ -1496,9 +1496,9 @@ class ProductionDataAnalyzer:
             ValueError: If date column not configured or invalid parameters specified
         """
         if not self.date_col:
-            raise ValueError("Time series visualization requires date column configuration")
+            raise ValueError("Time series visualization requires date column configuration\nInitialize analyzer with date_col parameter")
 
-        params = parameters or self.selected_params
+        params = parameters or [col for col in self.selected_params if col != self.date_col]
         invalid_params = set(params) - set(self.production.columns)
         if invalid_params:
             raise ValueError(f"Invalid parameters specified: {invalid_params}")

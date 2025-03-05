@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import shutil
 import plotly.graph_objects as go
+import panel as pn
 from ProductionDataAnalyzer.analyzer import ProductionDataAnalyzer
 
 # Fixtures ----------------------------------------------------------------
