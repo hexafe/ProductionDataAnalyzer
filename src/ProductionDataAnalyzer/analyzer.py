@@ -386,8 +386,9 @@ class ProductionDataAnalyzer:
                     errors='coerce'
                 )
                 continue
-            if col in id_cols:
-                continue
+            if id_cols:
+                if col in id_cols:
+                    continue
 
             # Process object/string columns
             if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
