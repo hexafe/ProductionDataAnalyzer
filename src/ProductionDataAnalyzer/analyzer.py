@@ -212,7 +212,7 @@ class ProductionDataAnalyzer:
             'sep': ';',
             'decimal': ',',
             'parse_dates': bool(date_col),
-            'dayfirst': False,
+            #'dayfirst': False,
             'na_values': ['\\N', '']
         }
         if date_col:
