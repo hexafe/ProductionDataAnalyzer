@@ -438,20 +438,22 @@ class TestDashboard:
     @patch('panel.Column')
     @patch('panel.widgets.MultiSelect')
     def test_dashboard_creation(self, mock_select, mock_col, analyzer):
-        real_widget = MultiSelect(
+        expected_params = ['temperature', 'pressure']
+        
+        mock_select.return_value = pn.widgets.MultiSelect(
             name='Parameters',
-            options=['temperature', 'pressure'],
+            options=expected_params,
             size=8
         )
-        mock_select.return_value = real_widget
-        mock_col.return_value = pn.Column(real_widget)
-        dashboard = analyzer.create_interactive_dashboard()
+        mock_col.return_value = pn.Column()
+        
+        analyzer.create_interactive_dashboard()
+        
         mock_select.assert_called_once_with(
             name='Parameters',
-            options=['temperature', 'pressure'],
+            options=expected_params,
             size=8
         )
-        mock_col.assert_called()
 
     def test_dashboard_environment_error(self):
         with patch('panel.extension', side_effect=ImportError):

@@ -1551,9 +1551,12 @@ class ProductionDataAnalyzer:
         except ImportError:
             raise RuntimeError("Panel library required for dashboard functionality")
 
-        # Create widgets
+        numeric_params = self.production.select_dtypes(include=np.number).columns.tolist()
+        
         param_selector = pn.widgets.MultiSelect(
-            name="Parameters", options=self.selected_params, size=8
+            name="Parameters",
+            options=numeric_params,
+            size=8
         )
         aggregation_selector = pn.widgets.Select(
             name="Aggregation", options=['raw', 'hourly', 'daily', 'weekly'], width=200
