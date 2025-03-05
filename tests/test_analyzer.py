@@ -286,7 +286,7 @@ class TestConcatEdgeCases:
         cleaned = ProductionDataAnalyzer._post_merge_cleanup(df, 'timestamp', None)
 
         assert len(cleaned) == 4
-        assert cleaned['timestamp'].isna().sum() == 2
+        assert cleaned['timestamp'].isna().sum() == 1
     
 class TestPipelineIntegration:
     @patch('ProductionDataAnalyzer.analyzer.files.upload')

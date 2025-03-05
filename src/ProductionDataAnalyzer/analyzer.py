@@ -233,6 +233,7 @@ class ProductionDataAnalyzer:
             'sep': ';',
             'decimal': ',',
             'parse_dates': False,
+            'dayfirst': True,
             'dtype': {date_col: str} if date_col else None,
             'na_values': ['\\N', ''],
             'keep_default_na': False
