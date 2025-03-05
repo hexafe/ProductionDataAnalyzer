@@ -220,13 +220,16 @@ class ProductionDataAnalyzer:
             default_csv_kwargs['date_parser'] = lambda x: pd.to_datetime(
                 x, format='%d.%m.%Y %H:%M', errors='coerce'
             )
+        
+        # Merge defaults with user-provided csv_kwargs
+        csv_kwargs = {**default_csv_kwargs, **(csv_kwargs or {})}
+        
+        # Update dtypes for id_cols if provided
         if id_cols:
             csv_kwargs['dtype'] = {
                 **csv_kwargs.get('dtype', {}),
                 **{col: str for col in id_cols}
             }
-
-        csv_kwargs = {**default_csv_kwargs, **(csv_kwargs or {})}
 
         # Merge user-provided Excel options with defaults
         default_excel_kwargs = {'engine': 'openpyxl'}
