@@ -438,7 +438,10 @@ class TestDashboard:
     @patch('panel.Column')
     @patch('panel.widgets.MultiSelect')
     def test_dashboard_creation(self, mock_select, mock_col, analyzer):
-        mock_select.return_value = MultiSelect(options=['temp'], value=['temp'])
+        mock_select.return_value = MultiSelect(
+            options=['temperature'], 
+            value=['temperature']
+        )
         mock_col.return_value = pn.Column("Test Content")
         
         dashboard = analyzer.create_interactive_dashboard()
