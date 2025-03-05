@@ -9,6 +9,7 @@ import tempfile
 import shutil
 import plotly.graph_objects as go
 import panel as pn
+from panel.widgets import MultiSelect
 from ProductionDataAnalyzer.analyzer import ProductionDataAnalyzer
 
 # Fixtures ----------------------------------------------------------------
@@ -437,7 +438,7 @@ class TestDashboard:
     @patch('panel.Column')
     @patch('panel.widgets.MultiSelect')
     def test_dashboard_creation(self, mock_select, mock_col, analyzer):
-        mock_select.return_value = pn.widgets.MultiSelect(options=['temp'])
+        mock_select.return_value = MultiSelect(options=['temp'], value=['temp'])
         mock_col.return_value = pn.Column("Test Content")
         
         dashboard = analyzer.create_interactive_dashboard()

@@ -1498,10 +1498,14 @@ class ProductionDataAnalyzer:
         if not self.date_col:
             raise ValueError("Time series visualization requires date column configuration\nInitialize analyzer with date_col parameter")
 
-        params = parameters or [col for col in self.selected_params if col != self.date_col]
-        invalid_params = set(params) - set(self.production.columns)
+        numeric_params = self.production.select_dtypes(include=np.number).columns.tolist()
+        params = parameters or numeric_params
+        if self.date_col in params:
+            params.remove(self.date_col)
+
+        invalid_params = set(params) - set(numeric_params)
         if invalid_params:
-            raise ValueError(f"Invalid parameters specified: {invalid_params}")
+            raise ValueError(f"Non-numeric parameters cannot be plotted: {invalid_params}")
 
         df = self.production.set_index(self.date_col)
         fig = px.line(df, x=df.index, y=params, title="Production Parameters Timeline")
