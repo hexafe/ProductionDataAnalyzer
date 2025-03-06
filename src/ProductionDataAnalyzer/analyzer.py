@@ -11,6 +11,7 @@ import plotly.express as px
 import plotly.figure_factory as ff
 import panel as pn
 import matplotlib.dates as mdates
+import datetime
 import gspread
 from google.colab import files, auth
 from google.auth import default
@@ -165,6 +166,9 @@ class ProductionDataAnalyzer:
         """
         Datetime parser with multiple fallback strategies
         """
+        if isinstance(date_str, (pd.Timestamp, datetime.datetime)):
+            return date_str
+
         formats = [
             # ISO variants
             '%Y-%m-%d %H:%M:%S.%f',    # 2023-07-17 14:30:45.123
