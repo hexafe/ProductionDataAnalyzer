@@ -164,7 +164,15 @@ class ProductionDataAnalyzer:
     @staticmethod
     def _datetime_converter(date_str):
         """
-        Datetime parser with multiple fallback strategies
+        Convert an input date value to a pandas Timestamp using multiple fallback parsing strategies
+
+        Parameters:
+            date_str (Union[str, pd.Timestamp, datetime.datetime]): The date value to convert
+                This can be a string in various common date formats, a pandas Timestamp or a datetime object
+
+        Returns:
+            pd.Timestamp or datetime.datetime: A pandas Timestamp representing the parsed date if conversion is successful
+                Otherwise returns pd.NaT if the input cannot be parsed into a valid date
         """
         if isinstance(date_str, (pd.Timestamp, datetime.datetime)):
             return date_str
