@@ -443,7 +443,9 @@ class ProductionDataAnalyzer:
 
         for col in df.columns:
             # Process the date column
-            if col == date_col:
+            if date_col and col == date_col:
+                if not pd.api.types.is_datetime64_any_dtype(df[col]):
+                    df[col] = df[col].apply(ProductionDataAnalyzer._datetime_converter)
                 continue
             if id_cols:
                 if col in id_cols:
