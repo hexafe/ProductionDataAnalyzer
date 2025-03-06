@@ -246,17 +246,9 @@ class ProductionDataAnalyzer:
         default_csv_kwargs = {
             'sep': ';',
             'decimal': ',',
-            'parse_dates': False,
-            'dayfirst': True,
-            'dtype': {date_col: str} if date_col else None,
             'na_values': ['\\N', ''],
             'keep_default_na': False
         }
-        if date_col:
-            default_csv_kwargs['parse_dates'] = [date_col]
-            default_csv_kwargs['date_parser'] = lambda x: pd.to_datetime(
-                x, format='%d.%m.%Y %H:%M', errors='coerce'
-            )
         
         # Merge defaults with user-provided csv_kwargs
         csv_kwargs = {**default_csv_kwargs, **(csv_kwargs or {})}
