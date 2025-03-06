@@ -167,12 +167,27 @@ class ProductionDataAnalyzer:
         Convert an input date value to a pandas Timestamp using multiple fallback parsing strategies
 
         Parameters:
-            date_str (Union[str, pd.Timestamp, datetime.datetime]): The date value to convert
-                This can be a string in various common date formats, a pandas Timestamp or a datetime object
+            date_str (str, pd.Timestamp, datetime.datetime): The date value to convert
+                This can be a string in various common date formats, a pandas Timestamp or a datetime.datetime object
 
         Returns:
-            pd.Timestamp or datetime.datetime: A pandas Timestamp representing the parsed date if conversion is successful
-                Otherwise returns pd.NaT if the input cannot be parsed into a valid date
+            pd.Timestamp if successfully parsed datetime object
+            pd.NaT if:
+                - input is None/NaN
+                - all format conversion attempts fail
+                - non-parsable non-datetime input
+
+        Examples:
+            Valid input formats include:
+                - '2023-07-17 14:30:45.123'
+                - '17.07.2023 14:30' (European format)
+                - '7/17/2023 02:30 PM' (US format)
+                - '20230717143045' (Compact notation)
+                - pandas.Timestamp objects pass through unchanged
+
+        Raises:
+            pd.errors.OutOfBoundsDatetime: If parsed date exceeds pandas' timestamp range
+            Note: Most errors return NaT rather than raising exception
         """
         if isinstance(date_str, (pd.Timestamp, datetime.datetime)):
             return date_str
