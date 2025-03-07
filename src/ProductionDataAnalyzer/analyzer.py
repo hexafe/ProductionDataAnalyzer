@@ -1785,49 +1785,86 @@ class ProductionDataAnalyzer:
         
     def _generate_statistical_insights(self, summary_stats: pd.DataFrame) -> str:
         """
-        Generate human-readable insights from numerical summary statistics
+        Generate prioritized technical insights with problem indicators
         
         Parameters:
             summary_stats (pd.DataFrame): Statistical summary from _get_summary_stats()
             
         Returns:
-            str: Plain language observations about the data distribution
+            str: Formatted insights with critical issues first, then key metrics
+        
+        Example Output:
+            [!] Critical Insights:
+            • Temperature shows instability (σ=15.2, 45% of mean) - investigate sensor/process
+            • Flow_rate has extreme values (max=98.3 vs 99th %ile=45.8) - check for outliers
             
-        Example:
-            >>> analyzer._generate_statistical_insights(summary_df)
-            '• Parameter "temperature" shows high variability (σ=15.2)
-            • "pressure" values range from 12.5 to 98.7 (Δ=86.2)
-            • "flow_rate" has potential outliers (99th %ile: 45.8 vs max: 98.3)'
+            Key Metrics:
+            • Pressure: 
+            - Stable range: 12.5-98.7 (Δ=86.2)
+            - Consistent distribution (IQR=12.3, CV=0.18)
+            • Motor_speed:
+            - 25% values below 850RPM - check underperforming units
+            - Mean (1200) ≠ Median (1150) - potential skew
         """
         if summary_stats.empty:
             return "No numerical parameters available for statistical insights"
         
-        insights = []
+        critical = []
+        metrics = []
         
         for param, stats in summary_stats.iterrows():
-            # Basic distribution metrics
+            # Calculate derived metrics
             param_range = stats['max'] - stats['min']
             iqr = stats['75%'] - stats['25%']
+            cv = stats['std'] / stats['mean'] if stats['mean'] != 0 else 0
             outlier_threshold = stats['75%'] + 1.5 * iqr
+            mean_median_diff = abs(stats['mean'] - stats['50%'])
             
-            # Build insight strings
-            insights.append(
-                f"• **{param}**\n"
-                f"  - Range: {stats['min']:.1f} to {stats['max']:.1f} (Δ={param_range:.1f})\n"
-                f"  - Median: {stats['50%']:.1f} (Mean: {stats['mean']:.1f})\n"
-                f"  - Spread: STD {stats['std']:.1f}, IQR {iqr:.1f}"
-            )
-            
-            # Outlier detection
+            # Build critical alerts
+            critical_notes = []
             if stats['max'] > outlier_threshold:
-                insights.append(
-                    f"  - Potential outliers: "
-                    f"99th %ile {stats['99%']:.1f} vs max {stats['max']:.1f}"
+                critical_notes.append(
+                    f"extreme values (max={stats['max']:.1f} vs 99th %ile={stats['99%']:.1f})"
+                )
+            if cv > 0.4:  # High variability
+                critical_notes.append(
+                    f"instability (σ={stats['std']:.1f}, {cv:.0%} of mean)"
+                )
+            if mean_median_diff > 0.1 * stats['mean']:
+                critical_notes.append(
+                    f"skew (mean={stats['mean']:.1f} ≠ median={stats['50%']:.1f})"
                 )
                 
-            # Variability assessment
-            if stats['std'] > 0.5 * stats['mean']:
-                insights.append(f"  - High variability (σ > 50% of mean value)")
+            # Build metric details
+            metric_notes = [
+                f"Range: {stats['min']:.1f}-{stats['max']:.1f} (Δ={param_range:.1f})",
+                f"IQR: {iqr:.1f}, CV: {cv:.2f}",
+                f"Central values: 50%={stats['50%']:.1f} (±{stats['std']:.1f} (stdev))"
+            ]
+            
+            # Special cases
+            if stats['25%'] == stats['75%']:
+                metric_notes.append("Constant values in 25-75% range")
+                
+            # Format outputs
+            if critical_notes:
+                critical.append(
+                    f"• {param}: {' - '.join(critical_notes)}"
+                )
+                
+            metrics.append(
+                f"• {param}: \n  - " + "\n  - ".join(metric_notes)
+            )
         
-        return '\n'.join(insights)
+        # Compose final output
+        output = []
+        if critical:
+            output.append("[!] Critical Insights:")
+            output.extend(critical)
+            output.append("")
+        
+        output.append("Key Metrics:")
+        output.extend(metrics)
+        
+        return '\n'.join(output)
 
