@@ -1608,10 +1608,32 @@ class ProductionDataAnalyzer:
         """
         try:
             import panel as pn
-            pn.extension()
+            from IPython.display import display, HTML
         except ImportError:
             raise RuntimeError("Panel library required for dashboard functionality")
 
+        # Check if running in Colab
+        try:
+            from google.colab import output
+            IN_COLAB = True
+        except ImportError:
+            IN_COLAB = False
+
+        # Colab-specific setup
+        if IN_COLAB:
+            # Install required dependencies
+            import subprocess
+            subprocess.run(["pip", "install", "jupyter_bokeh"], check=True)
+            
+            # Configure Panel for Colab
+            pn.extension(comms='colab')
+            
+            # Install localtunnel for public URL
+            subprocess.run(["npm", "install", "-g", "localtunnel"], check=True)
+        else:
+            pn.extension()
+
+        # Dashboard components creation (your existing code)
         numeric_params = [
             col for col in self.production.select_dtypes(include=np.number).columns 
             if col != self.date_col
@@ -1650,7 +1672,7 @@ class ProductionDataAnalyzer:
                 return pn.pane.Alert(str(e), alert_type="warning")
 
         # Compose dashboard
-        return pn.Column(
+        dashboard = pn.Column(
             pn.Row(
                 pn.Column(param_selector, aggregation_selector, corr_method_selector),
                 pn.Tabs(
@@ -1659,6 +1681,20 @@ class ProductionDataAnalyzer:
                 )
             )
         )
+
+        # Launch with Colab-specific handling
+        if IN_COLAB:
+            port = 43687
+            dashboard.show(port=port)  # Start the server
+            
+            # Generate public URL
+            from google.colab.output import eval_js
+            public_url = eval_js(f"google.colab.kernel.proxyPort({port})")
+            display(HTML(f'<a href="{public_url}" target="_blank">Open Dashboard in New Tab</a>'))
+        else:
+            dashboard.show()
+
+        return dashboard
 
     def visualize_eda_report(self, eda_report: Dict, output_format: str = 'html', output_path: str = 'eda_report.html') -> Optional[str]:
         """
@@ -1747,5 +1783,51 @@ class ProductionDataAnalyzer:
         plt.close(fig)
         return f'<img src="data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}">'
         
-
+    def _generate_statistical_insights(self, summary_stats: pd.DataFrame) -> str:
+        """
+        Generate human-readable insights from numerical summary statistics
+        
+        Parameters:
+            summary_stats (pd.DataFrame): Statistical summary from _get_summary_stats()
+            
+        Returns:
+            str: Plain language observations about the data distribution
+            
+        Example:
+            >>> analyzer._generate_statistical_insights(summary_df)
+            '• Parameter "temperature" shows high variability (σ=15.2)
+            • "pressure" values range from 12.5 to 98.7 (Δ=86.2)
+            • "flow_rate" has potential outliers (99th %ile: 45.8 vs max: 98.3)'
+        """
+        if summary_stats.empty:
+            return "No numerical parameters available for statistical insights"
+        
+        insights = []
+        
+        for param, stats in summary_stats.iterrows():
+            # Basic distribution metrics
+            param_range = stats['max'] - stats['min']
+            iqr = stats['75%'] - stats['25%']
+            outlier_threshold = stats['75%'] + 1.5 * iqr
+            
+            # Build insight strings
+            insights.append(
+                f"• **{param}**\n"
+                f"  - Range: {stats['min']:.1f} to {stats['max']:.1f} (Δ={param_range:.1f})\n"
+                f"  - Median: {stats['50%']:.1f} (Mean: {stats['mean']:.1f})\n"
+                f"  - Spread: STD {stats['std']:.1f}, IQR {iqr:.1f}"
+            )
+            
+            # Outlier detection
+            if stats['max'] > outlier_threshold:
+                insights.append(
+                    f"  - Potential outliers: "
+                    f"99th %ile {stats['99%']:.1f} vs max {stats['max']:.1f}"
+                )
+                
+            # Variability assessment
+            if stats['std'] > 0.5 * stats['mean']:
+                insights.append(f"  - High variability (σ > 50% of mean value)")
+        
+        return '\n'.join(insights)
 
