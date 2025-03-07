@@ -1608,93 +1608,121 @@ class ProductionDataAnalyzer:
         """
         try:
             import panel as pn
-            from IPython.display import display, HTML
-        except ImportError:
-            raise RuntimeError("Panel library required for dashboard functionality")
+            from IPython.display import display, clear_output
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError as e:
+            raise RuntimeError(f"Required packages missing: {str(e)}")
 
-        # Check if running in Colab
+        # Singleton server instance check
+        if hasattr(self, '_dashboard_server'):
+            print(f"[!] Dashboard already running at: {self._dashboard_url}")
+            return self._dashboard
+
+        # Environment detection
+        IN_COLAB = 'google.colab' in str(get_ipython())
+        PORT = 43687
+
         try:
-            from google.colab import output
-            IN_COLAB = True
-        except ImportError:
-            IN_COLAB = False
-
-        # Colab-specific setup
-        if IN_COLAB:
-            # Install required dependencies
-            import subprocess
-            subprocess.run(["pip", "install", "jupyter_bokeh"], check=True)
-            
-            # Configure Panel for Colab
-            pn.extension(comms='colab')
-            
-            # Install localtunnel for public URL
-            subprocess.run(["npm", "install", "-g", "localtunnel"], check=True)
-        else:
-            pn.extension()
-
-        # Dashboard components creation (your existing code)
-        numeric_params = [
-            col for col in self.production.select_dtypes(include=np.number).columns 
-            if col != self.date_col
-        ]
-        
-        param_selector = pn.widgets.MultiSelect(
-            name="Parameters",
-            options=numeric_params,
-            size=8
-        )
-        aggregation_selector = pn.widgets.Select(
-            name="Aggregation", options=['raw', 'hourly', 'daily', 'weekly'], width=200
-        )
-        corr_method_selector = pn.widgets.Select(
-            name="Correlation Method", options=['pearson', 'spearman', 'kendall'], width=200
-        )
-
-        # Create reactive components
-        @pn.depends(param_selector.param.value, aggregation_selector.param.value)
-        def timeline_plot(params, agg):
-            if agg != 'raw':
-                self.aggregate_data(period=agg)
-                df = self.daily_data
+            # Colab-specific setup
+            if IN_COLAB:
+                # Install requirements once
+                if not hasattr(self, '_colab_deps_installed'):
+                    import subprocess
+                    subprocess.run(["pip", "install", "-q", "jupyter_bokeh"], check=True)
+                    subprocess.run(["npm", "install", "-g", "localTunnel"], check=True)
+                    self._colab_deps_installed = True
+                    
+                pn.extension(comms='colab', notifications=True)
             else:
-                df = self.production
-            return self.plot_interactive_timeline(parameters=params)
+                pn.extension()
 
-        @pn.depends(param_selector.param.value, corr_method_selector.param.value)
-        def correlation_plot(params, method):
-            if len(params) < 2:
-                return pn.pane.Markdown("Select at least 2 parameters for correlation")
-            try:
-                corr_data = self.analyze_correlations()
-                return corr_data['plot']
-            except ValueError as e:
-                return pn.pane.Alert(str(e), alert_type="warning")
+            # Dashboard components (existing code)
+            numeric_params = [
+                col for col in self.production.select_dtypes(include=np.number).columns 
+                if col != self.date_col
+            ]
 
-        # Compose dashboard
-        dashboard = pn.Column(
-            pn.Row(
-                pn.Column(param_selector, aggregation_selector, corr_method_selector),
-                pn.Tabs(
-                    ("Timeline", timeline_plot),
-                    ("Correlations", correlation_plot)
+            # Widget creation
+            param_selector = pn.widgets.MultiSelect(
+                name="Parameters", options=numeric_params, size=8
+            )
+            aggregation_selector = pn.widgets.Select(
+                name="Aggregation", options=['raw', 'hourly', 'daily', 'weekly'], width=200
+            )
+            corr_method_selector = pn.widgets.Select(
+                name="Correlation Method", options=['pearson', 'spearman', 'kendall'], width=200
+            )
+
+            # Create reactive components
+            @pn.depends(param_selector.param.value, aggregation_selector.param.value)
+            def timeline_plot(params, agg):
+                if agg != 'raw':
+                    self.aggregate_data(period=agg)
+                    df = self.daily_data
+                else:
+                    df = self.production
+                return self.plot_interactive_timeline(parameters=params)
+
+            @pn.depends(param_selector.param.value, corr_method_selector.param.value)
+            def correlation_plot(params, method):
+                if len(params) < 2:
+                    return pn.pane.Markdown("Select at least 2 parameters for correlation")
+                try:
+                    corr_data = self.analyze_correlations()
+                    return corr_data['plot']
+                except ValueError as e:
+                    return pn.pane.Alert(str(e), alert_type="warning")
+
+            # Compose dashboard
+            self._dashboard = pn.Column(
+                pn.Row(
+                    pn.Column(param_selector, aggregation_selector, corr_method_selector),
+                    pn.Tabs(
+                        ("Timeline", timeline_plot),
+                        ("Correlations", correlation_plot)
+                    )
                 )
             )
-        )
 
-        # Launch with Colab-specific handling
-        if IN_COLAB:
-            port = 43687
-            dashboard.show(port=port)  # Start the server
-            
-            # Generate public URL
-            from google.colab.output import eval_js
-            public_url = eval_js(f"google.colab.kernel.proxyPort({port})")
-            display(HTML(f'<a href="{public_url}" target="_blank">Open Dashboard in New Tab</a>'))
-        else:
-            dashboard.show()
+            # Server launch
+            if IN_COLAB:
+                from google.colab.output import eval_js
+                from panel.io.server import get_server
+                
+                # Create server instance
+                self._dashboard_server = get_server()
+                self._dashboard_server.add_route("/", self._dashboard)
+                
+                # Start server thread
+                server_thread = threading.Thread(
+                    target=self._dashboard_server.start,
+                    kwargs={'port': PORT, 'allow_websocket_origin': ['*']}
+                )
+                server_thread.daemon = True
+                server_thread.start()
+                
+                # Wait for server init
+                time.sleep(1)
+                
+                # Generate stable URL
+                self._dashboard_url = eval_js(f"google.colab.kernel.proxyPort({PORT})")
+                display(HTML(
+                    f'<h3><a href="{self._dashboard_url}" target="_blank">'
+                    'Open Production Dashboard</a></h3>'
+                ))
+                
+            else:
+                self._dashboard.show(port=PORT)
+                
+            return self._dashboard
 
-        return dashboard
+        except Exception as e:
+            clear_output()
+            print(f"[!] Dashboard failed to initialize: {str(e)}")
+            if IN_COLAB:
+                print("Try: Runtime → Restart runtime → Run again")
+            raise
 
     def visualize_eda_report(self, eda_report: Dict, output_format: str = 'html', output_path: str = 'eda_report.html') -> Optional[str]:
         """
@@ -1867,4 +1895,74 @@ class ProductionDataAnalyzer:
         output.extend(metrics)
         
         return '\n'.join(output)
+
+    def _format_correlations(self, correlation_data: Dict) -> Dict:
+        """
+        Format correlation analysis results for visual reporting
+        
+        Parameters:
+            correlation_data (Dict): Output from analyze_correlations()
+            
+        Returns:
+            Dict: Formatted content with:
+                - matrix_table: Styled correlation matrix HTML
+                - top_positive: Strongest positive correlations
+                - top_negative: Strongest negative correlations
+                - heatmap_plot: Correlation heatmap visualization
+        """
+        if not correlation_data or 'matrix' not in correlation_data:
+            return {
+                'matrix_table': '<p>No correlation data available</p>',
+                'insights': 'Insufficient numeric parameters for correlation analysis'
+            }
+
+        # Style correlation matrix table
+        matrix = correlation_data['matrix']
+        styled_matrix = matrix.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1)\
+                                .format("{:.2f}")\
+                                .set_caption("Correlation Matrix")
+        
+        # Generate statistical insights
+        insights = self._generate_correlation_insights(matrix)
+        
+        return {
+            'matrix_table': styled_matrix.to_html(),
+            'insights': insights,
+            'heatmap_plot': correlation_data.get('plot', None)
+        }
+
+    def _generate_correlation_insights(self, corr_matrix: pd.DataFrame) -> str:
+        """
+        Identify significant correlations from matrix
+        
+        Parameters:
+            corr_matrix (pd.DataFrame): Square correlation matrix
+            
+        Returns:
+            str: Formatted insights with top correlations
+        
+        Example:
+            • Strong positive: Temp vs Pressure (r=0.89)
+            • Strong negative: FlowRate vs Voltage (r=-0.78)
+        """
+        insights = []
+        seen_pairs = set()
+        
+        # Flatten matrix and filter meaningful correlations
+        pairs = corr_matrix.unstack().sort_values(ascending=False)
+        for (param1, param2), value in pairs.items():
+            if param1 == param2 or (param2, param1) in seen_pairs:
+                continue
+                
+            if abs(value) > 0.7:  # Strong correlation threshold
+                descriptor = "Strong positive" if value > 0 else "Strong negative"
+                insights.append(f"• {descriptor}: {param1} vs {param2} (r={value:.2f})")
+                seen_pairs.add((param1, param2))
+                
+            elif abs(value) > 0.5:  # Moderate correlation
+                descriptor = "Moderate positive" if value > 0 else "Moderate negative"
+                insights.append(f"• {descriptor}: {param1} vs {param2} (r={value:.2f})")
+                seen_pairs.add((param1, param2))
+                
+        return '\n'.join(insights[:5])
 
