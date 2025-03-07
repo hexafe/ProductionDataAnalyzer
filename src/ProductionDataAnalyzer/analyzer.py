@@ -1620,6 +1620,8 @@ class ProductionDataAnalyzer:
             from IPython.display import display, clear_output
             import nest_asyncio
             nest_asyncio.apply()
+            import threading
+            import time
         except ImportError as e:
             raise RuntimeError(f"Required packages missing: {str(e)}")
 
@@ -2058,3 +2060,34 @@ class ProductionDataAnalyzer:
             
         except Exception as e:
             raise RuntimeError(f"HTML report generation failed: {str(e)}")
+
+    def _display_notebook_report(self, report_data: dict) -> None:
+        """
+        Display interactive EDA report in Jupyter notebooks
+        
+        Features:
+        - Integrated HTML display
+        - Interactive plot preservation
+        - Responsive layout
+        """
+        from IPython.display import display, HTML
+        
+        # Create report sections
+        sections = [
+            ("Summary Statistics", report_data['summary']['stats_table']),
+            ("Missing Data Analysis", report_data['missing_data']['missing_table']),
+            ("Feature Distributions", report_data['plots']['distributions']),
+            ("Correlation Matrix", report_data['plots']['correlation_matrix']),
+            ("Temporal Trends", report_data['plots']['temporal_trends'])
+        ]
+        
+        # Display each section with styling
+        display(HTML("<h1 style='color: #2c3e50'>Production Data Analysis Report</h1>"))
+        
+        for title, content in sections:
+            display(HTML(
+                f"<div style='margin: 20px 0; border-bottom: 2px solid #eee; padding-bottom: 20px'>"
+                f"<h2 style='color: #34495e'>{title}</h2>"
+                f"{content}"
+                f"</div>"
+            ))
