@@ -1659,3 +1659,93 @@ class ProductionDataAnalyzer:
                 )
             )
         )
+
+    def visualize_eda_report(self, eda_report: Dict, output_format: str = 'html', output_path: str = 'eda_report.html') -> Optional[str]:
+        """
+        Transform EDA raw dawa into visual format
+
+        Parameters:
+            eda_report (Dict):      EDA data from generate_eda_report()
+            output_format (str):    Output format: 'html' (default), 'console', 'notebook'
+            output_path (str):      File path for saved report (html format only)
+
+        Returns:
+            str: HTML content if output_format='html' and output_path=None
+            None: For other formats or when saving to file
+
+        Raises:
+            ValueError:     For invalid output formats
+            RuntimeError:   If required visualization dependencies are missing
+
+        Example:
+            >>> report = analyzer.generate_eda_report()
+            >>> analyzer.visualize_eda_report(report, output_format='notebook')
+        """
+        try:
+            import matplotlib.pyplot as plt
+            from jinja2 import Template
+            import base64
+        except ImportError as e:
+            raise RuntimeError(f"Missing visualization dependencies: {str(e)}")
+
+        report_data = {
+            'summary': self._format_summary(eda_report['summary_stats']),
+            'missing_data': self._format_missing_data(eda_report['missing_data']),
+            'correlations': self._format_correlations(eda_report['correlations']),
+            'plots': self._embed_visualizations(eda_report)
+        }
+
+        if output_format == 'html':
+            return self._generate_html_report(report_data, output_path)
+        elif output_format == 'console':
+            self._print_console_report(report_data)
+        elif output_format == 'notebook':
+            self._display_notebook_report(report_data)
+        else:
+            raise ValueError(
+                f"Invalid output format: {output_format}\n"
+                "Choose from 'html', 'console', 'notebook'"
+                )
+
+    def _format_summary(self, summary_stats: pd.DataFrame) -> Dict:
+        """Format numerical summary statistics for display"""
+        return {
+            'stats_table': summary_stats.style
+                .format("{:.3f}")
+                .set_caption("Numerical summary statistics")
+                .to_html(),
+            'statistical_insights': self._generate_statistical_insights(summary_stats)
+        }
+
+    def _format_missing_data(self, missing_data: pd.DataFrame) -> Dict:
+        """Format missing data analysis with visual indicators"""
+        return {
+            'missing_table': missing_data.style
+                .bar(subset=['missing_pct'], color='#d65f5f')
+                .format({'missing_pct': "{:.1%}"})
+                .to_html(),
+            'completeness_score': 1 - missing_data['missing_pct'].mean()
+        }
+
+    def _embed_visualizations(self, eda_report: Dict) -> Dict:
+        """Convert plots to embeddable formats"""
+        return {
+            'distributions': self._plot_to_html(eda_report['distribution_plots']),
+            'correlation_matrix': self._plot_to_html(eda_report['correlations']['matrix_plot']),
+            'temporal_trends': self._plot_to_html(eda_report['temporal_trends'])
+        }
+
+    def _plot_to_html(self, fig) -> str:
+        """Convert matplotlib/plotly figure to HTML string"""
+        from io import BytesIO
+        
+        if 'plotly' in str(type(fig)):
+            return fig.to_html(full_html=False)
+        
+        buf = BytesIO()
+        fig.savefig(buf, format='png', bbox_inches='tight')
+        plt.close(fig)
+        return f'<img src="data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}">'
+        
+
+
