@@ -1695,30 +1695,21 @@ class ProductionDataAnalyzer:
 
             # Server launch
             if IN_COLAB:
-                from google.colab.output import eval_js
                 from panel.io.server import get_server
+                from google.colab.output import eval_js
                 
-                # Create server instance
-                self._dashboard_server = get_server()
-                self._dashboard_server.add_route("/", self._dashboard)
-                
-                # Start server thread
-                server_thread = threading.Thread(
-                    target=self._dashboard_server.start,
-                    kwargs={'port': PORT, 'allow_websocket_origin': ['*']}
+                # Create and configure server
+                self._dashboard_server = get_server(self._dashboard)
+                self._dashboard_server.start(
+                    port=PORT,
+                    allow_websocket_origin=['*'],
+                    show=False
                 )
-                server_thread.daemon = True
-                server_thread.start()
                 
-                # Wait for server init
-                time.sleep(1)
-                
-                # Generate stable URL
+                # Generate URL
+                time.sleep(1)  # Allow server startup
                 self._dashboard_url = eval_js(f"google.colab.kernel.proxyPort({PORT})")
-                display(HTML(
-                    f'<h3><a href="{self._dashboard_url}" target="_blank">'
-                    'Open Production Dashboard</a></h3>'
-                ))
+                display(HTML(f'<h3><a href="{self._dashboard_url}" target="_blank">Open Dashboard</a></h3>'))
                 
             else:
                 self._dashboard.show(port=PORT)
