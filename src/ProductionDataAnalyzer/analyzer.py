@@ -1505,17 +1505,22 @@ class ProductionDataAnalyzer:
 
         Returns:
             Dict: Contains:
-                - pearson: Pearson correlation matrix
-                - spearman: Spearman rank correlation matrix  
-                - kendall: Kendall's tau correlation matrix
-                - plot: Interactive heatmap visualization
+                - pearson: Pearson correlation matrix (pd.DataFrame)
+                - spearman: Spearman rank correlation matrix (pd.DataFrame)
+                - kendall: Kendall's tau correlation matrix (pd.DataFrame)
+                - plot: Interactive heatmap visualization (plotly Figure)
 
         Raises:
-            ValueError: If insufficient numeric columns for correlation analysis
+            ValueError: If dataset contains fewer than 2 numeric columns
 
         Example:
             >>> correlations = analyzer.analyze_correlations()
-            >>> correlations['plot'].show()
+            >>> correlations['plot'].show()  # Display interactive heatmap
+            >>> correlations['pearson']  # Access Pearson correlation matrix
+
+        Note:
+            Returns empty plot in case of visualization errors
+            Preserves original correlation matrices even if plotting fails
         """
         numeric_df = self.production.select_dtypes(include=np.number)
         if len(numeric_df.columns) < 2:
@@ -1527,15 +1532,19 @@ class ProductionDataAnalyzer:
             'kendall': numeric_df.corr(method='kendall')
         }
 
-        fig = px.imshow(corr_data['pearson'],
+        try:
+            fig = px.imshow(corr_data['pearson'],
                         x=corr_data['pearson'].columns,
                         y=corr_data['pearson'].columns,
                         color_continuous_scale='RdBu_r',
                         zmin=-1,
                         zmax=1,
                         title="Pearson Correlation Matrix")
-        
-        corr_data['plot'] = fig
+            corr_data['plot'] = fig
+        except Exception as e:
+            corr_data['plot'] = None
+            print(f"Visualization error: {str(e)}")
+
         return corr_data
     
     def plot_interactive_timeline(self, parameters: List[str] = None) -> go.Figure:
@@ -1630,7 +1639,6 @@ class ProductionDataAnalyzer:
                 if not hasattr(self, '_colab_deps_installed'):
                     import subprocess
                     subprocess.run(["pip", "install", "-q", "jupyter_bokeh"], check=True)
-                    subprocess.run(["npm", "install", "-g", "localTunnel"], check=True)
                     self._colab_deps_installed = True
                     
                 pn.extension(comms='colab', notifications=True)
@@ -1794,14 +1802,18 @@ class ProductionDataAnalyzer:
     def _embed_visualizations(self, eda_report: Dict) -> Dict:
         """Convert plots to embeddable formats"""
         return {
-            'distributions': self._plot_to_html(eda_report['distribution_plots']),
-            'correlation_matrix': self._plot_to_html(eda_report['correlations']['matrix_plot']),
-            'temporal_trends': self._plot_to_html(eda_report['temporal_trends'])
+            'distributions': self._plot_to_html(eda_report.get('distribution_plots')),
+            'correlation_matrix': self._plot_to_html(
+                eda_report.get('correlations', {}).get('plot')
+            ),
+            'temporal_trends': self._plot_to_html(eda_report.get('temporal_trends'))
         }
 
     def _plot_to_html(self, fig) -> str:
         """Convert matplotlib/plotly figure to HTML string"""
         from io import BytesIO
+        if fig is None:
+            return "<p>Visualization not available</p>"
         
         if 'plotly' in str(type(fig)):
             return fig.to_html(full_html=False)
