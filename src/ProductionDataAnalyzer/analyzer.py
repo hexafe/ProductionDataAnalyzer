@@ -1698,16 +1698,21 @@ class ProductionDataAnalyzer:
                 from panel.io.server import get_server
                 from google.colab.output import eval_js
                 
-                # Create and configure server
-                self._dashboard_server = get_server(self._dashboard)
-                self._dashboard_server.start(
+                # Create server with port configuration
+                self._dashboard_server = get_server(
+                    self._dashboard,
                     port=PORT,
                     allow_websocket_origin=['*'],
                     show=False
                 )
                 
-                # Generate URL
-                time.sleep(1)  # Allow server startup
+                # Start server thread
+                server_thread = threading.Thread(target=self._dashboard_server.start)
+                server_thread.daemon = True
+                server_thread.start()
+                
+                # Generate URL after brief delay
+                time.sleep(1)
                 self._dashboard_url = eval_js(f"google.colab.kernel.proxyPort({PORT})")
                 display(HTML(f'<h3><a href="{self._dashboard_url}" target="_blank">Open Dashboard</a></h3>'))
                 
@@ -1969,3 +1974,87 @@ class ProductionDataAnalyzer:
                 
         return '\n'.join(insights[:5])
 
+    def _generate_html_report(self, report_data: dict, output_path: str) -> str:
+        """
+        Generate styled HTML report from EDA data
+        
+        Parameters:
+            report_data (dict): Processed EDA components
+            output_path (str): File path to save report
+            
+        Returns:
+            str: HTML content if output_path=None
+            
+        Raises:
+            RuntimeError: If template rendering fails
+        """
+        from jinja2 import Template
+        import base64
+        from datetime import datetime
+        
+        # HTML template with embedded styling
+        html_template = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Production Data Analysis Report</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 40px; }
+                .section { margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
+                h2 { color: #2c3e50; }
+                table { border-collapse: collapse; margin: 20px 0; }
+                th, td { padding: 8px 12px; border: 1px solid #ddd; }
+                th { background-color: #f8f9fa; }
+                img { max-width: 100%; margin: 10px 0; }
+                .alert { color: #856404; background-color: #fff3cd; padding: 10px; }
+            </style>
+        </head>
+        <body>
+            <h1>Production Data Analysis Report</h1>
+            <p>Generated: {{ timestamp }}</p>
+            
+            <div class="section">
+                <h2>Summary Statistics</h2>
+                {{ summary.stats_table|safe }}
+            </div>
+            
+            <div class="section">
+                <h2>Missing Data Analysis</h2>
+                {{ missing_data.missing_table|safe }}
+            </div>
+            
+            <div class="section">
+                <h2>Feature Distributions</h2>
+                {{ plots.distributions|safe }}
+            </div>
+            
+            <div class="section">
+                <h2>Correlation Analysis</h2>
+                {{ plots.correlation_matrix|safe }}
+            </div>
+            
+            <div class="section">
+                <h2>Temporal Trends</h2>
+                {{ plots.temporal_trends|safe }}
+            </div>
+        </body>
+        </html>
+        """
+        
+        try:
+            # Render template with data
+            template = Template(html_template)
+            html_content = template.render(
+                timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                **report_data
+            )
+            
+            # Save or return HTML
+            if output_path:
+                with open(output_path, 'w') as f:
+                    f.write(html_content)
+                return f"Report saved to {output_path}"
+            return html_content
+            
+        except Exception as e:
+            raise RuntimeError(f"HTML report generation failed: {str(e)}")
