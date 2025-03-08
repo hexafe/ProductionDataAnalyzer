@@ -1625,143 +1625,118 @@ class ProductionDataAnalyzer:
         except ImportError as e:
             raise RuntimeError(f"Required packages missing: {str(e)}")
 
-        # Singleton check and environment detection
+        # Singleton server instance check
         if hasattr(self, '_dashboard_server'):
             print(f"[!] Dashboard already running at: {self._dashboard_url}")
-            return
+            return self._dashboard
 
+        # Environment detection
         IN_COLAB = 'google.colab' in str(get_ipython())
-        PORT = 8080  # Changed to common web port
+        PORT = 43687
 
         try:
             # Colab-specific setup
             if IN_COLAB:
+                # Install requirements once
                 if not hasattr(self, '_colab_deps_installed'):
                     import subprocess
-                    subprocess.run([
-                        "pip", "install", "-q", 
-                        "panel>=1.3.0", "bokeh>=3.2.0", "jupyter_bokeh"
-                    ], check=True)
+                    subprocess.run(["pip", "install", "-q", "jupyter_bokeh"], check=True)
                     self._colab_deps_installed = True
-
+                    
                 pn.extension(comms='colab', notifications=True)
             else:
                 pn.extension()
 
-            # Widget initialization ==============================================
+            # Dashboard components (existing code)
             numeric_params = [
                 col for col in self.production.select_dtypes(include=np.number).columns 
                 if col != self.date_col
             ]
-            
-            if not numeric_params:
-                raise ValueError("No numeric parameters found for dashboard")
 
+            # Widget creation
             param_selector = pn.widgets.MultiSelect(
-                name="Parameters", 
-                options=numeric_params,
-                value=numeric_params[:2],  # Default selection
-                size=8
+                name="Parameters", options=numeric_params, size=8
             )
-            
-            # Create dashboard components ========================================
-            @pn.depends(param_selector.param.value)
-            def _dashboard_content(params):
-                if not params:
-                    return pn.pane.Alert("Select parameters to visualize", alert_type="warning")
-                
-                return pn.Column(
-                    pn.Row(
-                        pn.Column(param_selector, sizing_mode="stretch_height"),
-                        self.plot_interactive_timeline(parameters=params),
-                    self.analyze_correlations()['plot']
+            aggregation_selector = pn.widgets.Select(
+                name="Aggregation", options=['raw', 'hourly', 'daily', 'weekly'], width=200
+            )
+            corr_method_selector = pn.widgets.Select(
+                name="Correlation Method", options=['pearson', 'spearman', 'kendall'], width=200
+            )
+
+            # Create reactive components
+            @pn.depends(param_selector.param.value, aggregation_selector.param.value)
+            def timeline_plot(params, agg):
+                if agg != 'raw':
+                    self.aggregate_data(period=agg)
+                    df = self.daily_data
+                else:
+                    df = self.production
+                return self.plot_interactive_timeline(parameters=params)
+
+            @pn.depends(param_selector.param.value, corr_method_selector.param.value)
+            def correlation_plot(params, method):
+                if len(params) < 2:
+                    return pn.pane.Markdown("Select at least 2 parameters for correlation")
+                try:
+                    corr_data = self.analyze_correlations()
+                    return corr_data['plot']
+                except ValueError as e:
+                    return pn.pane.Alert(str(e), alert_type="warning")
+
+            # Compose dashboard
+            self._dashboard = pn.Column(
+                pn.Row(
+                    pn.Column(param_selector, aggregation_selector, corr_method_selector),
+                    pn.Tabs(
+                        ("Timeline", timeline_plot),
+                        ("Correlations", correlation_plot)
                     )
                 )
+            )
 
-            self._dashboard = pn.Template("""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    .main-container {
-                        margin: 20px;
-                        padding: 20px;
-                    }
-                    .sidebar {
-                        background: #f8f9fa;
-                        padding: 20px;
-                        border-right: 1px solid #eee;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="main-container">
-                    <div class="row">
-                        <div class="col-md-3 sidebar">
-                            ${widgets}
-                        </div>
-                        <div class="col-md-9">
-                            ${main}
-                        </div>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """).add_panel('widgets', param_selector).add_panel('main', _dashboard_content)
-
-            # Server launch ======================================================
+            # Server launch
             if IN_COLAB:
-                from panel.io.server import Server
+                from panel.io.server import get_server
                 from google.colab.output import eval_js
-
-                server = Server(
-                    {'/': self._dashboard},
-                    port=PORT,
-                    allow_websocket_origin=["*"],
-                    show=False,
-                    start=False,
-                    debug=True
-                )
-
-                # Start server in thread
-                server_thread = threading.Thread(target=server.start)
-                server_thread.daemon = True
-                server_thread.start()
-
-                # Wait for server to initialize
-                for _ in range(20):
-                    if server._started:
-                        break
-                    time.sleep(0.5)
-                else:
-                    raise RuntimeError("Server failed to start within 10 seconds")
-
-                # Generate proxied URL
-                self._dashboard_url = eval_js(f"google.colab.kernel.proxyPort({PORT})")
-                display(HTML(f"""
-                    <div style="margin: 20px; padding: 15px; border: 1px solid #4CAF50; border-radius: 5px;">
-                        <h3 style="color: #4CAF50;">Dashboard Ready 🚀</h3>
-                        <a href="{self._dashboard_url}" target="_blank" style="font-size: 1.2em;">
-                            Click here to open interactive dashboard
-                        </a>
-                    </div>
-                """))
                 
-                # Keep the thread alive
-                while True:
-                    time.sleep(600)
-
+                try:
+                    # Create server with port configuration
+                    self._dashboard_server = get_server(
+                        self._dashboard,
+                        port=PORT,
+                        allow_websocket_origin=['*'],
+                        show=False
+                    )
+                    
+                    # Start server thread
+                    server_thread = threading.Thread(target=self._dashboard_server.start)
+                    server_thread.daemon = True
+                    server_thread.start()
+                    
+                    # Generate URL after brief delay
+                    time.sleep(1)
+                    self._dashboard_url = eval_js(f"google.colab.kernel.proxyPort({PORT})")
+                    display(HTML(
+                        f'<div style="margin: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">'
+                        f'<h3>Interactive Dashboard Ready</h3>'
+                        f'<a href="{self._dashboard_url}" target="_blank" style="font-size: 1.1em;">'
+                        f'Open Dashboard in New Tab</a></div>'
+                    ))
+                except Exception as e:
+                    print(f"Failed to create dashboard URL: {str(e)}")
+                    print("Try: 1) Refresh browser 2) Check Colab permissions 3) Restart runtime")
+                
             else:
-                self._dashboard.show(port=PORT, open=True)
+                self._dashboard.show(port=PORT)
+                
+            return self._dashboard
 
         except Exception as e:
             clear_output()
-            print(f"[!] Dashboard initialization failed: {str(e)}")
+            print(f"[!] Dashboard failed to initialize: {str(e)}")
             if IN_COLAB:
-                print("Troubleshooting steps:")
-                print("1. Runtime → Restart runtime")
-                print("2. Check Colab permissions")
-                print("3. Verify internet connection")
+                print("Try: Runtime → Restart runtime → Run again")
             raise
 
     def visualize_eda_report(self, eda_report: Dict, output_format: str = 'html', output_path: str = 'eda_report.html') -> Optional[str]:
@@ -1857,67 +1832,18 @@ class ProductionDataAnalyzer:
         return vis
 
     def _plot_to_html(self, fig, title: str = None) -> str:
-        """Convert visualization figure to HTML
-        
-        Args:
-            fig: Matplotlib/Plotly figure object
-            title: Optional title to display above visualization
-        
-        Returns:
-            HTML string containing titled visualization
-        
-        Note:
-            - Handles both Matplotlib and Plotly figures
-            - Closes matplotlib figures to prevent memory leaks
-            - Includes error fallbacks for missing figures
-        """
+        """Convert matplotlib/plotly figure to HTML string"""
         from io import BytesIO
-        import base64
-        import matplotlib.pyplot as plt
-
-        # Initialize empty content
-        html_content = "<p>Visualization not available</p>"
+        if fig is None:
+            return "<p>Visualization not available</p>"
         
-        try:
-            if fig is not None:
-                # Plotly figure handling
-                if 'plotly' in str(type(fig)):
-                    html_content = fig.to_html(
-                        full_html=False,
-                        include_plotlyjs='cdn',  # CDN for smaller HTML size
-                        config={'responsive': True}
-                    )
-                
-                # Matplotlib figure handling
-                elif isinstance(fig, plt.Figure):
-                    buf = BytesIO()
-                    fig.savefig(
-                        buf, 
-                        format='png',
-                        bbox_inches='tight',
-                        dpi=100,
-                        facecolor='white'
-                    )
-                    plt.close(fig)  # Critical for memory management
-                    b64_img = base64.b64encode(buf.getvalue()).decode()
-                    html_content = f'<img src="data:image/png;base64,{b64_img}" style="max-width:100%">'
-                
-                # Unknown figure type fallback
-                else:
-                    html_content = f"<p>Unsupported figure type: {type(fig).__name__}</p>"
+        if 'plotly' in str(type(fig)):
+            return fig.to_html(full_html=False)
         
-        except Exception as e:
-            html_content = f'<div class="alert alert-error">Visualization error: {str(e)}</div>'
-        
-        # Add title if provided
-        if title:
-            return f"""
-            <div class="visualization-container">
-                <h3 class="viz-title">{title}</h3>
-                <div class="viz-content">{html_content}</div>
-            </div>
-            """
-        return html_content
+        buf = BytesIO()
+        fig.savefig(buf, format='png', bbox_inches='tight')
+        plt.close(fig)
+        return f'<img src="data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}">'
         
     def _generate_statistical_insights(self, summary_stats: pd.DataFrame) -> str:
         """
