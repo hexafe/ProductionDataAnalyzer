@@ -1617,7 +1617,7 @@ class ProductionDataAnalyzer:
         """
         try:
             import panel as pn
-            from IPython.display import display, clear_output
+            from IPython.display import display, clear_output, HTML
             import nest_asyncio
             nest_asyncio.apply()
             import threading
@@ -1799,13 +1799,28 @@ class ProductionDataAnalyzer:
 
     def _embed_visualizations(self, eda_report: Dict) -> Dict:
         """Convert plots to embeddable formats"""
-        return {
-            'distributions': self._plot_to_html(eda_report.get('distribution_plots')),
+        vis = {
             'correlation_matrix': self._plot_to_html(
-                eda_report.get('correlations', {}).get('plot')
+                eda_report.get('correlations', {}).get('plot'),
+                title="Correlation Matrix"
             ),
-            'temporal_trends': self._plot_to_html(eda_report.get('temporal_trends'))
+            'temporal_trends': self._plot_to_html(
+                eda_report.get('temporal_trends'),
+                title="Temporal Trends"
+            )
         }
+        
+        # Handle distribution plots with individual titles
+        dist_plots = []
+        if 'distribution_plots' in eda_report:
+            for param, fig in eda_report['distribution_plots'].items():
+                dist_plots.append(
+                    f"<h3>Distribution: {param}</h3>" + 
+                    self._plot_to_html(fig)
+                )
+        vis['distributions'] = "\n".join(dist_plots) if dist_plots else "No distributions"
+        
+        return vis
 
     def _plot_to_html(self, fig) -> str:
         """Convert matplotlib/plotly figure to HTML string"""
