@@ -1700,32 +1700,23 @@ class ProductionDataAnalyzer:
                 from panel.io.server import get_server
                 from google.colab.output import eval_js
                 
-                try:
-                    # Create server with port configuration
-                    self._dashboard_server = get_server(
-                        self._dashboard,
-                        port=PORT,
-                        allow_websocket_origin=['*'],
-                        show=False
-                    )
-                    
-                    # Start server thread
-                    server_thread = threading.Thread(target=self._dashboard_server.start)
-                    server_thread.daemon = True
-                    server_thread.start()
-                    
-                    # Generate URL after brief delay
-                    time.sleep(1)
-                    self._dashboard_url = eval_js(f"google.colab.kernel.proxyPort({PORT})")
-                    display(HTML(
-                        f'<div style="margin: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">'
-                        f'<h3>Interactive Dashboard Ready</h3>'
-                        f'<a href="{self._dashboard_url}" target="_blank" style="font-size: 1.1em;">'
-                        f'Open Dashboard in New Tab</a></div>'
-                    ))
-                except Exception as e:
-                    print(f"Failed to create dashboard URL: {str(e)}")
-                    print("Try: 1) Refresh browser 2) Check Colab permissions 3) Restart runtime")
+                # Create server with port configuration
+                self._dashboard_server = get_server(
+                    self._dashboard,
+                    port=PORT,
+                    allow_websocket_origin=['*'],
+                    show=False
+                )
+                
+                # Start server thread
+                server_thread = threading.Thread(target=self._dashboard_server.start)
+                server_thread.daemon = True
+                server_thread.start()
+                
+                # Generate URL after brief delay
+                time.sleep(1)
+                self._dashboard_url = eval_js(f"google.colab.kernel.proxyPort({PORT})")
+                display(HTML(f'<h3><a href="{self._dashboard_url}" target="_blank">Open Dashboard</a></h3>'))
                 
             else:
                 self._dashboard.show(port=PORT)
@@ -1831,7 +1822,7 @@ class ProductionDataAnalyzer:
         
         return vis
 
-    def _plot_to_html(self, fig, title: str = None) -> str:
+    def _plot_to_html(self, fig) -> str:
         """Convert matplotlib/plotly figure to HTML string"""
         from io import BytesIO
         if fig is None:
