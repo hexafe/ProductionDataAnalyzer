@@ -1617,7 +1617,7 @@ class ProductionDataAnalyzer:
         """
         try:
             import panel as pn
-            from IPython.display import display, clear_output
+            from IPython.display import display, clear_output, HTML
             import nest_asyncio
             nest_asyncio.apply()
             import threading
