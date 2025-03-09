@@ -1518,7 +1518,7 @@ class ProductionDataAnalyzer:
             
             stats.update(specs)
 
-        return {k: self._smart_round(v, 4)}# if isinstance(v, float) else v for k, v in stats.items()}
+        return {k: self._smart_round(v, 4) for k, v in stats.items()}# if isinstance(v, float) else v for k, v in stats.items()}
     
     def analyze_correlations(self) -> Dict:
         """
@@ -1561,6 +1561,13 @@ class ProductionDataAnalyzer:
                         zmin=-1,
                         zmax=1,
                         title="Pearson Correlation Matrix")
+            fig.update_layout(
+                width=1000, 
+                height=800,
+                margin=dict(l=100, r=100, t=50, b=100),
+                xaxis=dict(tickfont=dict(size=12)),
+                yaxis=dict(tickfont=dict(size=12))
+            )
             corr_data['plot'] = fig
         except Exception as e:
             corr_data['plot'] = None
@@ -1802,7 +1809,7 @@ class ProductionDataAnalyzer:
         """Format numerical summary statistics for display"""
         return {
             'stats_table': summary_stats.style
-                .format("{:.3f}")
+                .format(lambda x: f"{self._smart_round(x, 4)}")
                 .set_caption("Numerical summary statistics")
                 .to_html(),
             'statistical_insights': self._generate_statistical_insights(summary_stats)
@@ -2040,6 +2047,11 @@ class ProductionDataAnalyzer:
                 <h2>Summary Statistics</h2>
                 {{ summary.stats_table|safe }}
             </div>
+
+            <div class="section">
+                <h2>Statistical Insights</h2>
+                <pre>{{ summary.statistical_insights }}</pre>
+            </div>
             
             <div class="section">
                 <h2>Missing Data Analysis</h2>
@@ -2054,6 +2066,11 @@ class ProductionDataAnalyzer:
             <div class="section">
                 <h2>Correlation Analysis</h2>
                 {{ plots.correlation_matrix|safe }}
+            </div>
+
+            <div class="section">
+                <h2>Correlation Insights</h2>
+                <pre>{{ correlations.insights }}</pre>
             </div>
             
             <div class="section">
@@ -2096,9 +2113,11 @@ class ProductionDataAnalyzer:
         # Create report sections
         sections = [
             ("Summary Statistics", report_data['summary']['stats_table']),
+            ("Statistical Insights", f"<pre>{report_data['summary']['statistical_insights']}</pre>"),
             ("Missing Data Analysis", report_data['missing_data']['missing_table']),
             ("Feature Distributions", report_data['plots']['distributions']),
             ("Correlation Matrix", report_data['plots']['correlation_matrix']),
+            ("Correlation Insights", f"<pre>{report_data['correlations']['insights']}</pre>"),
             ("Temporal Trends", report_data['plots']['temporal_trends'])
         ]
         
