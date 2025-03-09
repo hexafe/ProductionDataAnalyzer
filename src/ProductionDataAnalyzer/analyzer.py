@@ -1444,7 +1444,13 @@ class ProductionDataAnalyzer:
             rows=len(numeric_cols), cols=3,
             column_widths=[0.4, 0.4, 0.2],
             specs=[[{"type": "histogram"}, {"type": "box"}, {"type": "table"}]] * len(numeric_cols),
-            subplot_titles=[f"{col} Distribution" for col in numeric_cols]
+            subplot_titles=[
+                f"{col} histogram" if i == 0 else 
+                f"{col} box plot" if i == 1 else 
+                f"{col} stats table"
+                for col in numeric_cols
+                for i in range(3)
+            ]
         )
 
         for i, col in enumerate(numeric_cols, 1):
@@ -1455,7 +1461,7 @@ class ProductionDataAnalyzer:
             fig.add_trace(
                 go.Table(
                     header=dict(values=["Metric", "Value"]),
-                    cells=dict(values=[list(stats.keys()), list(stats.values())])
+                    cells=dict(values=[list(stats.keys()), list(stats.values().round(4))])
                 ),
                 row=i, col=3
             )
