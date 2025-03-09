@@ -1461,7 +1461,7 @@ class ProductionDataAnalyzer:
             fig.add_trace(
                 go.Table(
                     header=dict(values=["Metric", "Value"]),
-                    cells=dict(values=[list(stats.keys()), list(stats.values().round(4))])
+                    cells=dict(values=[list(stats.keys()), list(stats.values())])
                 ),
                 row=i, col=3
             )
@@ -1477,10 +1477,10 @@ class ProductionDataAnalyzer:
         """Calculate comprehensive statistics for a feature"""
         stats = {
             'Count': df[col].count(),
-            'Min': df[col].min(),
-            'Max': df[col].max(),
-            'Mean': df[col].mean(),
-            'Std Dev': df[col].std()
+            'Min': df[col].min().round(4),
+            'Max': df[col].max().round(4),
+            'Mean': df[col].mean().round(4),
+            'Std Dev': df[col].std().round(4)
         }
 
         if col in self.param_limits:
@@ -1489,7 +1489,7 @@ class ProductionDataAnalyzer:
                 'LSL': lsl,
                 'USL': usl,
                 'Defects': ((df[col] < lsl) | (df[col] > usl)).sum(),
-                '% Defects': ((df[col] < lsl) | (df[col] > usl)).mean() * 100
+                '% Defects': round((((df[col] < lsl) | (df[col] > usl)).mean() * 100), 1)
             }
             
             # Process capability calculations
@@ -1499,7 +1499,7 @@ class ProductionDataAnalyzer:
                 ppu = (usl - df[col].mean()) / (3 * sigma)
                 ppl = (df[col].mean() - lsl) / (3 * sigma)
                 ppk = min(ppu, ppl)
-                specs.update({'Pp': pp, 'Ppk': ppk})
+                specs.update({'Pp': round(pp, 2), 'Ppk': round(ppk, 2)})
             
             stats.update(specs)
 
