@@ -162,7 +162,7 @@ class ProductionDataAnalyzer:
         print(f"Analyzer initialized with {len(self.production):,} records ({len(self.selected_params)} parameters)")
 
     @staticmethod
-    def _smart_rounding(value, decimal_places: int = 4):
+    def _smart_round(value, decimal_places: int = 4):
         """Format the number in fixed-point notation"""
         if isinstance(value, int):
             return value
@@ -1492,11 +1492,11 @@ class ProductionDataAnalyzer:
         """Calculate comprehensive statistics for a feature"""
         DECIMAL_PLACES = 4
         stats = {
-            'Count': self._smart_rounding(df[col].count(), DECIMAL_PLACES),
-            'Min': self._smart_rounding(df[col].min(), DECIMAL_PLACES),
-            'Max': self._smart_rounding(df[col].max(), DECIMAL_PLACES),
-            'Mean': self._smart_rounding(df[col].mean(), DECIMAL_PLACES),
-            'Std Dev': self._smart_rounding(df[col].std(), DECIMAL_PLACES)
+            'Count': self._smart_round(df[col].count(), DECIMAL_PLACES),
+            'Min': self._smart_round(df[col].min(), DECIMAL_PLACES),
+            'Max': self._smart_round(df[col].max(), DECIMAL_PLACES),
+            'Mean': self._smart_round(df[col].mean(), DECIMAL_PLACES),
+            'Std Dev': self._smart_round(df[col].std(), DECIMAL_PLACES)
         }
         if col in self.param_limits:
             lsl, usl = self.param_limits[col]
@@ -1518,7 +1518,7 @@ class ProductionDataAnalyzer:
             
             stats.update(specs)
 
-        return {k: round(v, 4) if isinstance(v, float) else v for k, v in stats.items()}
+        return {k: self._smart_round(v, 4)}# if isinstance(v, float) else v for k, v in stats.items()}
     
     def analyze_correlations(self) -> Dict:
         """
