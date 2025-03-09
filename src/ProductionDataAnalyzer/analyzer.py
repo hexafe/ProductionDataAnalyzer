@@ -162,6 +162,21 @@ class ProductionDataAnalyzer:
         print(f"Analyzer initialized with {len(self.production):,} records ({len(self.selected_params)} parameters)")
 
     @staticmethod
+    def _smart_rounding(value, decimal_places: int = 4):
+        """Format the number in fixed-point notation"""
+        if isinstance(value, int):
+            return value
+        elif isinstance(value, float):
+            s = f"{value:.15f}".rstrip('0').rstrip('.')
+            if '.' in s:
+                _, decimal_part = s.split('.')
+                if len(decimal_part) > decimal_places:
+                    value = round(value, decimal_places)
+            return int(value) if value.is_integer() else value
+        else:
+            return value
+
+    @staticmethod
     def _datetime_converter(date_str):
         """
         Convert an input date value to a pandas Timestamp using multiple fallback parsing strategies
@@ -1475,14 +1490,14 @@ class ProductionDataAnalyzer:
 
     def _calculate_feature_stats(self, df: pd.DataFrame, col: str) -> Dict:
         """Calculate comprehensive statistics for a feature"""
+        DECIMAL_PLACES = 4
         stats = {
-            'Count': df[col].count(),
-            'Min': df[col].min().round(4),
-            'Max': df[col].max().round(4),
-            'Mean': df[col].mean().round(4),
-            'Std Dev': df[col].std().round(4)
+            'Count': self._smart_rounding(df[col].count(), DECIMAL_PLACES),
+            'Min': self._smart_rounding(df[col].min(), DECIMAL_PLACES),
+            'Max': self._smart_rounding(df[col].max(), DECIMAL_PLACES),
+            'Mean': self._smart_rounding(df[col].mean(), DECIMAL_PLACES),
+            'Std Dev': self._smart_rounding(df[col].std(), DECIMAL_PLACES)
         }
-
         if col in self.param_limits:
             lsl, usl = self.param_limits[col]
             specs = {
