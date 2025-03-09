@@ -1389,7 +1389,7 @@ class ProductionDataAnalyzer:
         """
         numeric_cols = self.production.select_dtypes(include=np.number).columns
         if not numeric_cols.empty:
-            return self.production[numeric_cols].describe(percentiles=[.01, .25, .5, .75, .99]).T
+            return self.production[numeric_cols].describe(percentiles=[.01, .25, .5, .75, .99]).T.round(4)
         raise ValueError("No numeric columns found for statistical summary")
 
     def _analyze_missing_data(self):
