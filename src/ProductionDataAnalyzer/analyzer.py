@@ -164,9 +164,10 @@ class ProductionDataAnalyzer:
     @staticmethod
     def _smart_round(value, decimal_places: int = 4):
         """Format the number in fixed-point notation"""
-        if isinstance(value, int):
-            return value
-        elif isinstance(value, float):
+        if isinstance(value, (int, np.integer)):
+            return int(value)
+        elif isinstance(value, (float, np.floating)):
+            value = float(value)
             s = f"{value:.15f}".rstrip('0').rstrip('.')
             if '.' in s:
                 _, decimal_part = s.split('.')
