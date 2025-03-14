@@ -23,6 +23,7 @@ from rich.table import Table
 from rich.progress import track
 from rich.markdown import Markdown
 from IPython import get_ipython
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class ProductionDataAnalyzer:
     """
@@ -661,6 +662,9 @@ class ProductionDataAnalyzer:
             - Maintains original row order from production data
             - Returns a copy of the filtered data to prevent SettingWithCopy warnings
             - Converts ID columns to string type for cross-type matching
+            - ID columns are converted to strings during matching
+            - Numeric IDs will be stringified (e.g., 00123 → '123')
+            - For exact matching of zero-padded IDs, ensure ID columns  are stored as strings in your source data
         """
         # Validate input DataFrames
         if production_data_df.empty or id_data_df.empty:
@@ -742,8 +746,11 @@ class ProductionDataAnalyzer:
 
         # Common saving logic
         def save_file(path: str) -> float:
+            from pathlib import Path
+            output_path = Path(filename)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(
-                path,
+                output_path,
                 index=False,
                 sep=sep,
                 decimal=decimal,
@@ -777,7 +784,7 @@ class ProductionDataAnalyzer:
                     )
                 else:
                     if Confirm.ask(
-                        f"💾 Save to [bold]{filename}[/]?",
+                        f"Save to [bold]{filename}[/]?",
                         default=True
                     ):
                         file_size = save_file(filename)
