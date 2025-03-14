@@ -489,9 +489,10 @@ class ProductionDataAnalyzer:
         if file_path.suffix.lower() in archive_ext:
             try:
                 Archive(str(file_path)).extractall(str(tmp_dir))
-                file_path.unlink()
             except Exception as e:
                 print(f"Failed to extract {file_path.name}: {str(e)}")
+                if (tmp_dir / file_path.name).exists():
+                    (tmp_dir / file_path.name).unlink()
 
     @staticmethod
     def _read_data_file(
@@ -566,9 +567,8 @@ class ProductionDataAnalyzer:
         # Vectorized date parsing
         if date_col:
             df[date_col] = pd.to_datetime(
-                df[date_col], 
-                errors='coerce', 
-                infer_datetime_format=True
+                df[date_col],
+                errors='coerce'
             )
             if df[date_col].isna().all():
                 raise ValueError(f"All values in date column '{date_col}' are invalid")
@@ -605,7 +605,7 @@ class ProductionDataAnalyzer:
             if col == date_col:
                 continue
             
-            if col in id_cols:
+            if id_cols is not None and col in id_cols:
                 df[col] = df[col].astype('category')
                 continue
 
@@ -735,8 +735,10 @@ class ProductionDataAnalyzer:
                 Saved to /projects/data/production_data.csv (25.6KB)
         """
         # Input validation
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            raise ValueError("Input must be a non-empty pandas DataFrame")
+        if not isinstance(df, pd.DataFrame):
+            raise TypeError("Input must be a DataFrame")
+        if len(df) < 1:
+            raise ValueError("DataFrame must contain at least one row")
         
         if not isinstance(filename, str) or not filename.endswith('.csv'):
             raise ValueError("Filename must be string ending with .csv")
@@ -1566,7 +1568,7 @@ class ProductionDataAnalyzer:
             # Core report components
             report_data['summary_stats'] = self._get_summary_stats()
             report_data['missing_data'] = self._analyze_missing_data()
-            report_data['distributions'] = self.plot_feature_distributions(sample_size)
+            report_data['distribution_plots'] = self.plot_feature_distributions(sample_size)
             report_data['correlations'] = self.analyze_correlations()
             
             if self.date_col:
