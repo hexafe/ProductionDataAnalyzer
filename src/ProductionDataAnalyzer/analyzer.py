@@ -1,6 +1,7 @@
-from typing import Union, Dict, List, Tuple, Optional
+from typing import Union, Dict, List, Tuple, Optional, Any
 import os
 import io
+import sys
 import tempfile
 from pathlib import Path
 import pandas as pd
@@ -13,10 +14,15 @@ import panel as pn
 import matplotlib.dates as mdates
 import datetime
 import gspread
-from google.colab import files, auth
+from google.colab import auth
 from google.auth import default
 from pyunpack import Archive
 import shutil
+from rich.console import Console
+from rich.table import Table
+from rich.progress import track
+from rich.markdown import Markdown
+from IPython import get_ipython
 
 class ProductionDataAnalyzer:
     """
@@ -98,10 +104,15 @@ class ProductionDataAnalyzer:
     ...     update_strategy='dynamic_retrain'
     ... )
     """
+
+    IN_COLAB = 'google.colab' in sys.modules
+    console = Console(force_terminal=True if not IN_COLAB else False)
+
     def __init__(
         self,
         production_data: pd.DataFrame,
-        date_col: str = None
+        date_col: str = None,
+        enable_rich: bool = True
     ):
         """
         Initialize a production data analyzer with raw data and configuration
@@ -111,6 +122,8 @@ class ProductionDataAnalyzer:
                                             Must contain a datetime column and various parameters to analyze
             date_col (str):                 Name of the datetime column used for temporal analysis
                                             Default: None - class can manage data without datetime column
+            enable_rich (bool):             Enable rich terminal output (local only)
+                                            Default: True
 
         Raises:
             TypeError:  If input data is not a pandas DataFrame
@@ -158,8 +171,22 @@ class ProductionDataAnalyzer:
             'year': mdates.DateFormatter('%Y')
         }
 
+        self.enable_rich = enable_rich if not self.IN_COLAB else False
+        if self.enable_rich:
+            self.console = Console()
+            self.console.print(
+                Markdown("# Production Data Analyzer initialized"),
+                style="bold blue"
+            )
+
         # Initialization feedback
         print(f"Analyzer initialized with {len(self.production):,} records ({len(self.selected_params)} parameters)")
+
+    def _print(self, message, style=None):
+        if self.enable_rich:
+            self.console.print(message, style=style)
+        else:
+            print(message)
 
     @staticmethod
     def _smart_round(value, decimal_places: int = 4):
@@ -247,245 +274,352 @@ class ProductionDataAnalyzer:
         archive_ext: tuple = ('.zip', '.7z', '.rar', '.tar', '.gz'),
         csv_ext: tuple = ('.csv',),
         excel_ext: tuple = ('.xls', '.xlsx'),
-        tmp_dir: str = '/content/tmp_upload',
+        tmp_dir: str = None,
         remove_tmp_dir: bool = True,
         chunksize: int = 100000,
+        local_files: List[str] = None,
+        max_workers: int = 4
     ) -> pd.DataFrame:
         """
-        Upload files (CSV, Excel, and various archives) from Google Colab and return a combined DataFrame
+        Upload/read files (CSV, Excel, and various archives) from Google Colab/local environment and return a combined DataFrame
+        Processes CSV, Excel, and compressed archives with parallel processing and memory optimization
 
         Custom keyword arguments for reading CSV and Excel files can be provided via
         `csv_kwargs` and `excel_kwargs`, respectively. Defaults are used if not specified
 
         Parameters:
-            date_col (str):         Name of the column to parse as datetime
-            id_cols (List[str]):    List of names for ID columns to preserve as strings
-            csv_kwargs (dict):      Optional parameters for pd.read_csv
-                                    Default: {'sep': ';', 'decimal': ',', 'parse_dates': [date_col],
-                                              'dayfirst': True, 'na_values': ['\\N', '']}
-            excel_kwargs (dict):    Optional parameters for pd.read_excel
-                                    Default: {'engine': 'openpyxl'}
-            archive_ext (tuple):    File extensions recognized as archives
-                                    Default: ('.zip', '.7z', '.rar', '.tar', '.gz')
-            csv_ext (tuple):        File extensions recognized as CSV files
-                                    Default: ('.csv',)
-            excel_ext (tuple):      File extensions recognized as Excel files
-                                    Default: ('.xls', '.xlsx')
-            tmp_dir (str):          Directory to store temporary files
-                                    Default: '/content/tmp_upload'
-            remove_tmp_dir (bool):  Whether to remove the temporary directory after processing
-                                    Default: True
-            chunksize (int):        Number of rows per chunk for processing large CSV files
-                                    If None, CSV files are read in one go
-                                    Default: 100000
+            date_col (str):             Name of the column to parse as datetime
+            id_cols (List[str]):        List of names for ID columns to preserve as strings
+            csv_kwargs (dict):          Custom parameters for pd.read_csv(). Merged with defaults:
+                                        {
+                                            'sep': ';', 
+                                            'decimal': ',',
+                                            'parse_dates': [date_col] if date_col else False,
+                                            'dayfirst': True,
+                                            'na_values': ['\\N', ''],
+                                            'keep_default_na': False
+                                        }
+                                        Default: None
+            excel_kwargs (dict):        Custom parameters for pd.read_excel(). Merged with:
+                                        {'engine': 'openpyxl', 'na_values': ['\\N', '']}
+                                        Default: None
+            archive_ext (tuple):        File extensions recognized as archives
+                                        Default: ('.zip', '.7z', '.rar', '.tar', '.gz')
+            csv_ext (tuple):            File extensions recognized as CSV files
+                                        Default: ('.csv',)
+            excel_ext (tuple):          File extensions recognized as Excel files
+                                        Default: ('.xls', '.xlsx')
+            tmp_dir (str):              Temporary directory path for file processing. Created automatically if None
+                                        Default: None
+            remove_tmp_dir (bool):      Whether to remove the temporary directory after processing. Recommended for security
+                                        Default: True
+            chunksize (int):            Number of rows per chunk for processing large CSV files
+                                        If None, CSV files are read in one go
+                                        Default: 100000
+            local_files (List[str]):    List of local files path to load in local env
+                                        Default: None
+            max_workers (int):          Parallel processing threads for file reading
+                                        Default: 4
+
+        Environment-specific behavior:
+            Colab:
+                - Uses interactive file upload widget
+            Local:
+                - Requires explicit file paths in local_files
+                - Handles system file paths directly
 
         Returns:
-            pd.DataFrame: Combined DataFrame after processing all uploaded files
+            pd.DataFrame: Combined DataFrame after processing all files
 
         Raises:
-            ValueError: If no valid data files are processed
+            ValueError:         Invalid date_col specification or missing local_files in local environment
+            FileNotFoundError:  Missing local_files paths in local mode
+            RuntimeError:       Unsupported file formats or processing failures
+            PermissionError:    File system access issues for tmp_dir
         """
-        # Merge user-provided CSV options with defaults (user values override defaults)
-        default_csv_kwargs = {
-            'sep': ';',
-            'decimal': ',',
-            'na_values': ['\\N', ''],
-            'keep_default_na': False
-        }
-        
-        # Merge defaults with user-provided csv_kwargs
-        csv_kwargs = {**default_csv_kwargs, **(csv_kwargs or {})}
-        
-        # Update dtypes for id_cols if provided
-        if id_cols:
-            csv_kwargs['dtype'] = {
-                **csv_kwargs.get('dtype', {}),
-                **{col: str for col in id_cols}
-            }
+        # Configure temporary directory
+        tmp_dir_path = Path(tmp_dir) if tmp_dir else Path(
+            tempfile.mkdtemp(prefix="prod_analysis_")
+        )
+        tmp_dir_path.mkdir(parents=True, exist_ok=True)
 
-        # Merge user-provided Excel options with defaults
-        default_excel_kwargs = {'engine': 'openpyxl'}
-        excel_kwargs = {**default_excel_kwargs, **(excel_kwargs or {})}
+        # Configure file handlers
+        csv_kwargs = ProductionDataAnalyzer._configure_csv_reader(
+            date_col, id_cols, csv_kwargs)
+        excel_kwargs = ProductionDataAnalyzer._configure_excel_reader(excel_kwargs)
 
-        uploaded = files.upload()
+        processed_files = set()
         dfs = []
-        os.makedirs(tmp_dir, exist_ok=True)
-        tmp_dir_path = Path(tmp_dir)
+        executor = None
 
         try:
-            # Process each uploaded file
-            for fn, content in uploaded.items():
-                try:
+            # Environment-specific file collection
+            if ProductionDataAnalyzer.IN_COLAB:
+                from google.colab import files
+                uploaded = files.upload()
+                for fn, content in uploaded.items():
                     file_path = tmp_dir_path / fn
-                    with open(file_path, 'wb') as f:
-                        f.write(content)
-                    lower_fn = fn.lower()
-                    # Process archive files by extracting them
-                    if any(lower_fn.endswith(ext) for ext in archive_ext):
-                        try:
-                            Archive(str(file_path)).extractall(str(tmp_dir_path))
-                            print(f"Successfully extracted: {fn}")
-                            # Remove the archive file after extraction
-                            file_path.unlink()
-                        except Exception as e:
-                            print(f"Failed to extract {fn}: {str(e)}")
-                            continue
-                    # Process CSV files
-                    elif any(lower_fn.endswith(ext) for ext in csv_ext):
-                        if chunksize is None:
-                            df = pd.read_csv(io.BytesIO(content), **csv_kwargs)
-                        else:
-                            chunks = pd.read_csv(io.BytesIO(content), chunksize=chunksize, **csv_kwargs)
-                            df = pd.concat(chunks, ignore_index=True)
-                        dfs.append(df)
-                        print(f"Processed CSV directly: {fn}")
-                    # Process Excel files
-                    elif any(lower_fn.endswith(ext) for ext in excel_ext):
-                        df = pd.read_excel(io.BytesIO(content), **excel_kwargs)
-                        if id_cols:
-                            for col in id_cols:
-                                if col in df.columns:
-                                    df[col] = df[col].astype(str)
-                        dfs.append(df)
-                        print(f"Processed Excel directly: {fn}")
-                except Exception as e:
-                    print(f"Error processing {fn}: {str(e)}")
-                    continue
+                    file_path.write_bytes(content)
+                    ProductionDataAnalyzer._process_archive(
+                        file_path, tmp_dir_path, archive_ext)
+            else:
+                if not local_files:
+                    raise ValueError("Local execution requires 'local_files' parameter")
+                for file_path in map(Path, local_files):
+                    if not file_path.exists():
+                        raise FileNotFoundError(f"File not found: {file_path}")
+                    ProductionDataAnalyzer._process_archive(
+                        file_path, tmp_dir_path, archive_ext)
 
-            # Process files extracted from archives
-            for extracted_file in tmp_dir_path.rglob('*'):
-                if extracted_file.is_file():
+            # Collect all processable files
+            processed_files = {
+                f for f in tmp_dir_path.rglob('*')
+                if f.is_file() and f.suffix.lower() in (csv_ext + excel_ext)
+            }
+
+            # Parallel processing with ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = []
+                for file_path in processed_files:
+                    futures.append(executor.submit(
+                        ProductionDataAnalyzer._read_data_file,
+                        file_path, csv_kwargs, excel_kwargs,
+                        csv_ext, excel_ext, chunksize
+                    ))
+                
+                for future in as_completed(futures):
                     try:
-                        lower_suffix = extracted_file.suffix.lower()
-                        if lower_suffix in csv_ext:
-                            if chunksize is None:
-                                df = pd.read_csv(extracted_file, **csv_kwargs)
-                            else:
-                                chunks = pd.read_csv(extracted_file, chunksize=chunksize, **csv_kwargs)
-                                df = pd.concat(chunks, ignore_index=True)
-                            dfs.append(df)
-                            print(f"Processed extracted CSV: {extracted_file.name}")
-                        elif lower_suffix in excel_ext:
-                            df = pd.read_excel(extracted_file, **excel_kwargs)
-                            if od_cols:
-                                for col in id_cols:
-                                    if col in df.columns:
-                                        df[col] = df[col].astype(str)
-                            dfs.append(df)
-                            print(f"Processed extracted Excel: {extracted_file.name}")
+                        dfs.append(future.result())
                     except Exception as e:
-                        print(f"Error processing extracted file {extracted_file.name}: {str(e)}")
-                        continue
+                        print(f"Error processing file: {str(e)}")
+                        raise
+
+        except Exception as e:
+            raise RuntimeError(f"File processing failed: {str(e)}") from e
         finally:
-            # Clean up the temporary directory if requested
             if remove_tmp_dir:
                 shutil.rmtree(tmp_dir_path, ignore_errors=True)
 
         if not dfs:
-            raise ValueError(
-                "No valid data files processed. Please check:\n"
-                "1. File extensions (.csv, .xls, .xlsx)\n"
-                "2. Archive integrity\n"
-                "3. Supported formats: CSV, Excel, ZIP, 7z, RAR, TAR, GZ"
+            raise RuntimeError(
+                "No valid data processed - check:\n"
+                "1. Supported formats (CSV, Excel, ZIP, 7z, RAR)\n"
+                "2. Archive contents\n"
+                "3. Column names match expectations"
             )
 
-        combined = pd.concat(dfs, ignore_index=True)
+        combined = pd.concat(dfs, ignore_index=True, copy=False)
         return ProductionDataAnalyzer._post_merge_cleanup(combined, date_col, id_cols)
 
     @staticmethod
-    def _post_merge_cleanup(df: pd.DataFrame, date_col: str, id_cols: List[str]) -> pd.DataFrame:
+    def _configure_csv_reader(
+        date_col: str | None, 
+        id_cols: List[str] | None, 
+        csv_kwargs: dict | None
+    ) -> dict:
         """
-        Perform cleanup on the combined DataFrame:
-          - Remove duplicate rows
-          - Sort by the date column
-          - Reset index
-          - Optimize data types to reduce memory usage
+        Configures CSV reader parameters with safety defaults
 
         Parameters:
-            df (pd.DataFrame):      Combined DataFrame
-            date_col (str):         Name of the date column
-            id_cols (List[str]):    List of names for ID columns to preserve as strings
+            date_col (str | None):       datetime column name for parsing
+            id_cols (List[str] | None):  columns to preserve as strings
+            csv_kwargs (dict | None):    user-provided CSV parameters
 
         Returns:
-            pd.DataFrame: Cleaned and optimized DataFrame
-        """
-        df = df.copy()
+            dict: Merged configuration with priority:
+                1. User-provided csv_kwargs
+                2. ID column type preservation
+                3. European-format defaults
 
-        # Remove duplicate rows, keeping the first occurence
-        df = df.drop_duplicates(keep='first')
-        if date_col:
-            # Convert while preserving original data
-            original_dates = df[date_col].copy()
-            df[date_col] = df[date_col].apply(ProductionDataAnalyzer._datetime_converter)
+        Raises:
+            ValueError: If conflicting date parsing configuration
+        """
+        defaults = {
+            'sep': ';',
+            'decimal': ',',
+            'parse_dates': [date_col] if date_col else False,
+            'dayfirst': True,
+            'na_values': ['\\N', ''],
+            'keep_default_na': False,
+            'dtype': {col: str for col in id_cols} if id_cols else None,
+            'engine': 'c',
+            'memory_map': True
+        }
+        return {**defaults, **(csv_kwargs or {})}
+
+    @staticmethod
+    def _configure_excel_reader(excel_kwargs: dict | None) -> dict:
+        """
+        Configures Excel reader with openpyxl engine
+
+        Parameters:
+            excel_kwargs (dict | None):  user-provided Excel parameters
+
+        Returns:
+            dict: Merged configuration ensuring:
+                - openpyxl engine usage
+                - Consistent NA value handling
+                - Type inference optimization
+
+        Raises:
+            ImportError: If openpyxl not installed
+        """
+        defaults = {
+            'engine': 'openpyxl',
+            'na_values': ['\\N', ''],
+            'keep_default_na': False
+        }
+        return {**defaults, **(excel_kwargs or {})}
+
+    @staticmethod
+    def _process_archive(file_path: Path, tmp_dir: Path, archive_ext: tuple) -> None:
+        """
+        Handles archive extraction with format validation
+
+        Parameters:
+            file_path (Path):            Path to archive file
+            tmp_dir (Path):              Target directory for extraction
+            archive_ext (tuple):         Valid archive extensions
+
+        Raises:
+            RuntimeError:                Unsupported archive format or extraction failure
+            ValueError:                  Invalid archive structure
+        """
+        if file_path.suffix.lower() in archive_ext:
+            try:
+                Archive(str(file_path)).extractall(str(tmp_dir))
+                file_path.unlink()
+            except Exception as e:
+                print(f"Failed to extract {file_path.name}: {str(e)}")
+
+    @staticmethod
+    def _read_data_file(
+        file_path: Path, 
+        csv_kwargs: dict, 
+        excel_kwargs: dict,
+        csv_ext: tuple, 
+        excel_ext: tuple, 
+        chunksize: int | None
+    ) -> pd.DataFrame:
+        """
+        Reads individual data file
+
+        Parameters:
+            file_path (Path):            File to process
+            csv_kwargs (dict):           Configured CSV parameters
+            excel_kwargs (dict):         Configured Excel parameters
+            csv_ext (tuple):             Valid CSV extensions
+            excel_ext (tuple):           Valid Excel extensions
+            chunksize (int | None):      Chunk size for CSV processing
+
+        Returns:
+            pd.DataFrame: Parsed data with initial type inference
+
+        Raises:
+            RuntimeError:                Unsupported file format or read failure
+            ParserError:                 Malformed CSV/Excel content
+        """
+        try:
+            if file_path.suffix.lower() in csv_ext:
+                if chunksize:
+                    chunks = pd.read_csv(file_path, chunksize=chunksize, **csv_kwargs)
+                    return pd.concat(chunks, ignore_index=True)
+                return pd.read_csv(file_path, **csv_kwargs)
             
-            # Validation with helpful error message
-            na_count = df[date_col].isna().sum()
-            if na_count == len(df):
-                invalid_samples = original_dates.head(3).tolist()
-                raise ValueError(
-                    f"All {len(df)} timestamp values invalid. "
-                    f"First 3 examples: {invalid_samples}\n"
-                    "Please verify date formats match supported patterns."
-                )
-            elif na_count > 0:
-                print(f"Warning: {na_count}/{len(df)} timestamps couldn't be parsed")
-                
-            df = df.sort_values(date_col).reset_index(drop=True)
+            if file_path.suffix.lower() in excel_ext:
+                return pd.read_excel(file_path, **excel_kwargs)
+            
+            raise ValueError(f"Unsupported file format: {file_path.suffix}")
+        
+        except Exception as e:
+            raise RuntimeError(
+                f"Error reading {file_path.name}: {str(e)}"
+            ) from e
+
+    @staticmethod
+    def _post_merge_cleanup(
+        df: pd.DataFrame, 
+        date_col: str | None, 
+        id_cols: List[str] | None
+    ) -> pd.DataFrame:
+        """
+        Performs post-merge dataset optimization and validation
+
+        Parameters:
+            df (pd.DataFrame):           Raw combined dataset
+            date_col (str | None):       datetime column name
+            id_cols (List[str] | None):  categorical columns
+
+        Returns:
+            pd.DataFrame: Optimized dataset with:
+                - Deduplicated records
+                - Valid datetime conversion
+                - Memory-optimized dtypes
+
+        Raises:
+            ValueError:                  Invalid datetime values in date_col
+        """
+        # Deduplication
+        df = df.drop_duplicates().reset_index(drop=True)
+        
+        # Vectorized date parsing
+        if date_col:
+            df[date_col] = pd.to_datetime(
+                df[date_col], 
+                errors='coerce', 
+                infer_datetime_format=True
+            )
+            if df[date_col].isna().all():
+                raise ValueError(f"All values in date column '{date_col}' are invalid")
+            df = df.sort_values(date_col)
+        
+        # Memory optimization
         return ProductionDataAnalyzer._optimize_dtypes(df, date_col, id_cols)
 
     @staticmethod
     def _optimize_dtypes(
-        df: pd.DataFrame,
-        date_col: str,
-        id_cols: List[str],
-        numeric_threshold: float = 0.95,
-        categorical_threshold: float = 0.1
+        df: pd.DataFrame, 
+        date_col: str | None, 
+        id_cols: List[str] | None
     ) -> pd.DataFrame:
         """
-        Optimize DataFrame memory usage with safe numeric conversion
+        Optimizes DataFrame memory usage through type downcasting
 
         Parameters:
-            df (pd.DataFrame):              DataFrame to optimize
-            date_col (str):                 Name of the date column
-            id_cols (List[str]):            List of names for ID columns to preserve as strings
-            numeric_threshold (float):      Proportion of unique values to consider numeric
-            categorical_threshold (float):  Proportion of unique values to consider categorical
+            df (pd.DataFrame):           Input dataset
+            date_col (str | None):       Already converted datetime column
+            id_cols (List[str] | None):  Columns to convert to categorical
 
         Returns:
-            pd.DataFrame: Optimized DataFrame
+            pd.DataFrame: Memory-optimized dataset with:
+                - Categorical types for ID columns
+                - Downcast numeric types
+                - String types for high-cardinality text
+                - Boolean types for binary values
+
+        Raises:
+            TypeError:                   Invalid type conversion attempts
         """
-        # Work on a copy to avoid modifying the original DataFrame
-        df = df.copy()
-
         for col in df.columns:
-            # Process the date column
-            if date_col and col == date_col:
-                if not pd.api.types.is_datetime64_any_dtype(df[col]):
-                    df[col] = df[col].apply(ProductionDataAnalyzer._datetime_converter)
+            if col == date_col:
                 continue
-            if id_cols:
-                if col in id_cols:
-                    continue
+            
+            if col in id_cols:
+                df[col] = df[col].astype('category')
+                continue
 
-            # Process object/string columns
-            if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
-                numeric_vals = pd.to_numeric(df[col], errors='coerce')
-                valid_ratio = numeric_vals.notnull().mean()
-                if valid_ratio >= numeric_threshold:
-                    if numeric_vals.dropna().apply(lambda x: x == int(x)).all():
-                        df[col] = pd.to_numeric(numeric_vals, downcast='integer')
-                    else:
-                        df[col] = pd.to_numeric(numeric_vals, downcast='float')
+            if pd.api.types.is_string_dtype(df[col]):
+                # Attempt numeric conversion
+                numeric = pd.to_numeric(df[col], errors='coerce')
+                if numeric.notna().mean() > 0.9:
+                    df[col] = numeric.pipe(pd.to_numeric, downcast='unsigned')
                 else:
                     unique_ratio = df[col].nunique() / len(df)
-                    if unique_ratio <= categorical_threshold:
-                        df[col] = df[col].astype('category')
+                    df[col] = df[col].astype('category' if unique_ratio < 0.5 else 'string')
+            
             elif pd.api.types.is_numeric_dtype(df[col]):
-                if pd.api.types.is_integer_dtype(df[col]):
-                    df[col] = pd.to_numeric(df[col], downcast='integer')
-                else:
-                    df[col] = pd.to_numeric(df[col], downcast='float')
-
+                df[col] = pd.to_numeric(df[col], downcast='integer' if 'int' in str(df[col].dtype) else 'float')
+        
         return df
 
     @staticmethod
@@ -558,38 +692,43 @@ class ProductionDataAnalyzer:
         # Reset index while preserving original order
         return filtered_df.reset_index(drop=True)
 
-    @staticmethod
     def save_to_csv(
+        self,
         df: pd.DataFrame,
         filename: str = 'output.csv',
         sep: str = ';',
-        decimal: str = ','
+        decimal: str = ',',
+        force_download: bool = False
     ) -> None:
         """
-        Save a DataFrame to CSV file with configurable formatting and automatic download in Colab
+        Save DataFrame to CSV with environment-adapted behavior
 
         Parameters:
-            df (pd.DataFrame):  DataFrame to save. Must contain valid column names and data
-            filename (str):     Output file name/path. Must have .csv extension
-                                Default: 'output.csv'
-            sep (str):          Column separator. Recommended: ';' for European format, ',' for US.
-                                Default: ';'
-            decimal (str):      Decimal separator. Recommended: ',' for European, '.' for US.
-                                Default: ','
+            df (pd.DataFrame):      DataFrame to save
+            filename (str):         Output filename/path
+            sep (str):              Column separator
+            decimal (str):          Decimal separator
+            force_download (bool):  Bypass confirmation prompt (local only)
+                                    Default: False
 
-        Returns:
-            None: Outputs file to disk and triggers browser download in Colab environments
+        Environment-specific Behavior:
+            Colab:
+                - Triggers browser download automatically
+                - Saves temporary file in Colab runtime
+            Local:
+                - Saves to filesystem
+                - Shows rich confirmation prompt unless force_download=True
+                - Allows filename modification via prompt
 
         Raises:
-            ValueError:       If input validation fails for parameters or DataFrame
-            PermissionError:  If file write permissions are insufficient
-            RuntimeError:     For Colab-specific download failures
+            ValueError: For invalid filename/DataFrame
+            PermissionError: For write permission issues
+            RuntimeError: For download failures in Colab
 
         Example:
-            >>> df = pd.DataFrame({'temp': [20.5, 21.3], 'pressure': [101.3, 102.4]})
-            >>> ProductionDataAnalyzer.save_to_csv(df, 'sensor_data.csv')
-            Successfully saved 2 rows with 2 columns to sensor_data.csv (0.5KB)
-            Downloading sensor_data.csv...
+            >>> analyzer.save_to_csv(df, 'production_data.csv')
+                Save file to production_data.csv? [y/N]: y
+                Saved to /projects/data/production_data.csv (25.6KB)
         """
         # Input validation
         if not isinstance(df, pd.DataFrame) or df.empty:
@@ -601,45 +740,76 @@ class ProductionDataAnalyzer:
         if len(sep) != 1 or len(decimal) != 1:
             raise ValueError("Separators must be single-character strings")
 
-        try:
-            # Save with European-style formatting by default
+        # Common saving logic
+        def save_file(path: str) -> float:
             df.to_csv(
-                filename,
+                path,
+                index=False,
                 sep=sep,
                 decimal=decimal,
-                index=False,
                 encoding='utf-8',
                 date_format='%Y-%m-%d %H:%M:%S'
             )
+            return os.path.getsize(path) / 1024
+
+        try:
+            if self.IN_COLAB:
+                # Colab: Save and trigger download
+                file_size = save_file(filename)
+                from google.colab import files
+                files.download(filename)
+                self._print(
+                    f"Saved and downloaded [bold green]{filename}[/] "
+                    f"({len(df):,} rows, {file_size:.1f}KB)",
+                    style="green"
+                )
+                
+            else:
+                # Local: Interactive handling
+                from rich.prompt import Confirm, Prompt
+                
+                if force_download:
+                    file_size = save_file(filename)
+                    self._print(
+                        f"Saved to [bold green]{os.path.abspath(filename)}[/] "
+                        f"({len(df):,} rows, {file_size:.1f}KB)",
+                        style="green"
+                    )
+                else:
+                    if Confirm.ask(
+                        f"💾 Save to [bold]{filename}[/]?",
+                        default=True
+                    ):
+                        file_size = save_file(filename)
+                        self._print(
+                            f"Saved to [bold green]{os.path.abspath(filename)}[/] "
+                            f"({len(df):,} rows, {file_size:.1f}KB)",
+                            style="green"
+                        )
+                    else:
+                        new_name = Prompt.ask(
+                            "Enter new filename",
+                            default=filename
+                        )
+                        if not new_name.endswith('.csv'):
+                            new_name += '.csv'
+                            
+                        file_size = save_file(new_name)
+                        self._print(
+                            f"Saved to [bold green]{os.path.abspath(new_name)}[/] "
+                            f"({len(df):,} rows, {file_size:.1f}KB)",
+                            style="green"
+                        )
+
         except PermissionError as pe:
             raise PermissionError(
-                f"Write permission denied for {filename}. "
-                "Check directory permissions or try different location."
+                f"Permission denied for [bold]{filename}[/]: "
+                f"{str(pe)}"
             ) from pe
-        except Exception as e:
-            raise RuntimeError(f"CSV save failed: {str(e)}") from e
-
-        # Generate output summary
-        row_count = len(df)
-        col_count = len(df.columns)
-        file_size_kb = os.path.getsize(filename) / 1024
-        
-        print(
-            f"Successfully saved {row_count} rows with {col_count} columns "
-            f"to {filename} ({file_size_kb:.1f}KB)"
-        )
-
-        # Handle Colab-specific download
-        try:
-            from google.colab import files
-            files.download(filename)
-            print(f"Download initiated for {filename}")
-        except ImportError:
-            print(f"File saved locally at {os.path.abspath(filename)}")
+            
         except Exception as e:
             raise RuntimeError(
-                f"Download failed: {str(e)}\n"
-                f"File remains available at {os.path.abspath(filename)}"
+                f"[red]Failed to save CSV:[/] {str(e)}"
             ) from e
       
     def aggregate_data(self, period: str = 'day') -> None:
@@ -1033,7 +1203,7 @@ class ProductionDataAnalyzer:
             # Authentication flow
             auth.authenticate_user()
             creds, _ = default()
-            gc = gspread.authorize(cred)
+            gc = gspread.authorize(creds)
 
             # Sheet access
             try:
@@ -1348,37 +1518,219 @@ class ProductionDataAnalyzer:
                 f"Limit storage failed: {str(e)}"
             ) from e
 
-    def generate_eda_report(self, sample_size: int = None) -> Dict:
+    def generate_eda_report(
+        self,
+        sample_size: int = None,
+        console_width: int = 120,
+        max_correlations: int = 10,
+        output_path: Optional[str] = None
+    ) -> Union[Dict, str]:
         """
-        Generate EDA report with interactive elements
+        Generate environment-appropriate EDA report with technical insights
 
         Parameters:
-            sample_size (int, optional): Maximum number of samples to use for visualizations
-                Default: None - uses all available data
+            sample_size (int):         Maximum samples for visualizations
+                                        (terminal mode enforces 5000 max)
+            console_width (int):        Width of terminal output (characters)
+                                        Default: 120
+            max_correlations (int):     Maximum correlation pairs to show
+                                        Default: 10
+            output_path (str):          File path to save HTML report (Colab only)
+                                        Default: None
+
+        Environment-specific Behavior:
+            Colab:
+                - Returns Dict with interactive Plotly figures
+                - Optionally saves HTML report
+            Local:
+                - Outputs rich terminal report
+                - Returns formatted string if rich disabled
 
         Returns:
-            Dict - containing:
-            - summary_stats: Statistical summary
-            - missing_data: Missing value analysis
-            - distribution_plots: Interactive distribution charts
-            - correlations: Correlation matrices
-            - temporal_trends: Interactive time series overview
+            Dict: Colab - Full report dictionary with figures
+            str:  Local - Formatted text report when rich disabled
 
-        Example:
-            >>> analyzer.generate_eda_report() # uses full dataset
-            >>> analyzer.generate_eda_report(5000) # uses 5000 samples
-
-        Note:
-            Full dataset analysis may impact performance with large datasets (>1M rows)
+        Raises:
+            RuntimeError: If report generation fails in current environment
         """
-        report = {
-            'summary_stats': self._get_summary_stats(),
-            'missing_data': self._analyze_missing_data(),
-            'distribution_plots': self.plot_feature_distributions(sample_size),
-            'correlations': self.analyze_correlations(),
-            'temporal_trends': self.plot_interactive_timeline()
-        }
-        return report
+        report_data = {}
+        
+        try:
+            # Core report components
+            report_data['summary_stats'] = self._get_summary_stats()
+            report_data['missing_data'] = self._analyze_missing_data()
+            report_data['distributions'] = self.plot_feature_distributions(sample_size)
+            report_data['correlations'] = self.analyze_correlations()
+            
+            if self.date_col:
+                report_data['temporal_trends'] = self.plot_interactive_timeline()
+            
+            # Statistical insights
+            report_data['statistical_insights'] = self._generate_statistical_insights(
+                report_data['summary_stats']
+            )
+        except Exception as e:
+            raise RuntimeError(f"EDA report generation failed: {str(e)}") from e
+
+        if self.IN_COLAB:
+            # Colab-specific output handling
+            if output_path:
+                self._save_html_report(report_data, output_path)
+            return report_data
+        else:
+            return self._render_local_report(report_data, console_width, max_correlations)
+
+    def _render_local_report(
+        self,
+        report_data: Dict,
+        console_width: int,
+        max_correlations: int
+    ) -> Optional[str]:
+        """Render terminal-optimized EDA report."""
+        if self.enable_rich:
+            self._display_rich_report(report_data, console_width, max_correlations)
+            return None
+        else:
+            return self._format_text_report(report_data, max_correlations)
+
+    def _display_rich_report(
+        self,
+        report_data: Dict,
+        width: int,
+        max_correlations: int
+    ) -> None:
+        """Rich terminal report presentation."""
+        from rich.panel import Panel
+        from rich.columns import Columns
+
+        # Summary Stats
+        summary_table = Table(title="Numerical Summary", width=width-4)
+        summary_table.add_column("Feature", style="cyan")
+        for col in report_data['summary_stats'].columns:
+            summary_table.add_column(col, style="magenta")
+        
+        for idx, row in report_data['summary_stats'].iterrows():
+            summary_table.add_row(idx, *[str(self._smart_round(v)) for v in row])
+
+        self.console.print(Panel(summary_table, title="[bold]1. Summary Statistics"))
+
+        # Missing Data
+        missing_table = Table(title="Missing Values", width=width-4)
+        missing_table.add_column("Feature", style="cyan")
+        missing_table.add_column("Missing", style="red")
+        missing_table.add_column("Percentage", style="yellow")
+        
+        for idx, row in report_data['missing_data'].iterrows():
+            missing_table.add_row(
+                idx,
+                str(row['missing_count']),
+                f"{row['missing_pct']:.1%}"
+            )
+        
+        self.console.print(Panel(missing_table, title="[bold]2. Missing Data Analysis"))
+
+        # Statistical Insights
+        insights_panel = Panel(
+            Markdown(report_data['statistical_insights']),
+            title="[bold]3. Technical Insights",
+            width=width
+        )
+        self.console.print(insights_panel)
+
+        # Correlation Analysis
+        corr_matrix = self._format_correlation_matrix(
+            report_data['correlations']['pearson'],
+            max_correlations
+        )
+        self.console.print(Panel(corr_matrix, title="[bold]4. Top Correlations"))
+
+        # Temporal Trends
+        if 'temporal_trends' in report_data:
+            self.console.print(Panel.fit(
+                "[bold green]Temporal trends available - call plot_interactive_timeline()",
+                title="[bold]5. Temporal Analysis"
+            ))
+
+    def _format_correlation_matrix(
+        self,
+        corr_matrix: pd.DataFrame,
+        max_pairs: int
+    ) -> Table:
+        """Create rich table of top correlations."""
+        corr_table = Table(title=f"Top {max_pairs} Correlations")
+        corr_table.add_column("Pair", style="cyan")
+        corr_table.add_column("Pearson", style="magenta")
+        corr_table.add_column("Type", style="yellow")
+
+        pairs = corr_matrix.unstack().sort_values(key=abs, ascending=False)
+        count = 0
+        
+        for (f1, f2), value in pairs.items():
+            if f1 == f2 or count >= max_pairs:
+                continue
+                
+            corr_type = "🡅 Positive" if value > 0 else "🡇 Negative"
+            style = "green" if abs(value) > 0.7 else "yellow" if abs(value) > 0.5 else "dim"
+            
+            corr_table.add_row(
+                f"{f1} ↔ {f2}",
+                f"{value:.2f}",
+                corr_type,
+                style=style
+            )
+            count += 1
+
+        return corr_table
+
+    def _format_text_report(
+        self,
+        report_data: Dict,
+        max_correlations: int
+    ) -> str:
+        """Generate plain text EDA report."""
+        report = []
+        
+        # Summary Stats
+        report.append("=== Numerical Summary ===")
+        report.append(report_data['summary_stats'].to_string())
+        
+        # Missing Data
+        report.append("\n=== Missing Values ===")
+        report.append(report_data['missing_data'].to_string())
+        
+        # Statistical Insights
+        report.append("\n=== Technical Insights ===")
+        report.append(report_data['statistical_insights'])
+        
+        # Correlations
+        report.append("\n=== Top Correlations ===")
+        pairs = report_data['correlations']['pearson'].unstack()
+        pairs = pairs.sort_values(key=abs, ascending=False)
+        
+        count = 0
+        for (f1, f2), value in pairs.items():
+            if f1 != f2 and count < max_correlations:
+                report.append(f"{f1} vs {f2}: {value:.2f}")
+                count += 1
+        
+        return "\n".join(report)
+
+    def _save_html_report(self, report_data: Dict, output_path: str) -> None:
+        """Save interactive HTML report (Colab only)."""
+        from plotly.io import to_html
+        
+        html_content = []
+        for section in ['distributions', 'correlations', 'temporal_trends']:
+            if fig := report_data.get(section):
+                html_content.append(to_html(fig))
+        
+        with open(output_path, 'w') as f:
+            f.write("<html><body>")
+            f.write("<h1>Production Data EDA Report</h1>")
+            f.write("\n".join(html_content))
+            f.write("</body></html>")
+        
+        print(f"Saved HTML report to {output_path}")
 
     def _get_summary_stats(self) -> pd.DataFrame:
         """
@@ -1431,63 +1783,144 @@ class ProductionDataAnalyzer:
         missing['unique_count'] = self.production.nunique()
         return missing.sort_values('missing_pct', ascending=False)
 
-    def plot_feature_distributions(self, sample_size: int = None) -> go.Figure:
+    def plot_feature_distributions(
+        self,
+        sample_size: int = None,
+        terminal_width: int = 80,
+        terminal_height: int = 20,
+        hist_bins: int = 20
+    ) -> Optional[go.Figure]:
         """
         Create interactive distribution plots with statistical summary table
 
         Parameters:
-            sample_size (int, optional): Number of samples to plot. 
-                                       If None, uses all data (default: None)
+            sample_size (int):         Maximum samples for visualization
+                                        (terminal mode enforces 5000 max)
+            terminal_width (int):      Width of terminal plots (characters)
+                                        Default: 80
+            terminal_height (int):     Height of terminal plots (lines)
+                                        Default: 20
+            hist_bins (int):           Number of histogram bins
+                                        Default: 20
+
+        Environment-specific Behavior:
+            Colab:
+                - Returns interactive Plotly Figure
+                - Uses full dataset unless sample_size specified
+            Local:
+                - Outputs terminal plots directly
+                - Enforces sample_size <= 5000 for performance
+                - Returns None
 
         Returns:
-            go.Figure: Plotly Figure containing:
-                - Histogram and box plot for each numeric parameter
-                - Statistical summary table with:
-                    * Basic statistics (min, max, mean, std)
-                    * Process capability metrics (if limits defined)
-                    * Defect rate calculations
+            go.Figure | None: Plotly figure in Colab, None in local mode
 
         Raises:
-            ValueError: If no numeric columns found for visualization
+            ValueError: If no numeric columns found
+            RuntimeError: If visualization fails in current environment
         """
         numeric_cols = self.production.select_dtypes(include=np.number).columns.tolist()
         if not numeric_cols:
-            raise ValueError("No numeric columns found for distribution plots")
+            raise ValueError("No numeric columns available for distribution analysis")
 
-        df = self.production if sample_size is None else self.production.sample(min(sample_size, len(self.production)))
+        # Prepare data sample
+        df = self.production if sample_size is None else \
+            self.production.sample(min(sample_size, len(self.production)))
 
-        fig = make_subplots(
-            rows=len(numeric_cols), cols=3,
-            column_widths=[0.4, 0.4, 0.2],
-            specs=[[{"type": "histogram"}, {"type": "box"}, {"type": "table"}]] * len(numeric_cols),
-            subplot_titles=[
-                f"{col} histogram" if i == 0 else 
-                f"{col} box plot" if i == 1 else 
-                f"{col} stats table"
-                for col in numeric_cols
-                for i in range(3)
-            ]
-        )
-
-        for i, col in enumerate(numeric_cols, 1):
-            fig.add_trace(go.Histogram(x=df[col], name=col), row=i, col=1)
-            fig.add_trace(go.Box(x=df[col], name=col), row=i, col=2)
-            
-            stats = self._calculate_feature_stats(df, col)
-            fig.add_trace(
-                go.Table(
-                    header=dict(values=["Metric", "Value"]),
-                    cells=dict(values=[list(stats.keys()), list(stats.values())])
-                ),
-                row=i, col=3
+        if self.IN_COLAB:
+            # Plotly implementation for Colab
+            fig = make_subplots(
+                rows=len(numeric_cols), cols=2,
+                specs=[[{"type": "histogram"}, {"type": "box"}]] * len(numeric_cols),
+                subplot_titles=[f"{col} | Histogram" for col in numeric_cols] + 
+                            [f"{col} | Box Plot" for col in numeric_cols]
             )
 
-        fig.update_layout(
-            height=400*len(numeric_cols),
-            showlegend=False,
-            title_text="Feature Distributions with Statistical Summary"
-        )
-        return fig
+            for idx, col in enumerate(numeric_cols, 1):
+                fig.add_trace(go.Histogram(x=df[col], name=col), row=idx, col=1)
+                fig.add_trace(go.Box(x=df[col], name=col), row=idx, col=2)
+
+            fig.update_layout(
+                height=300*len(numeric_cols),
+                showlegend=False,
+                title_text="Feature Distributions"
+            )
+            return fig
+
+        else:
+            # Terminal visualization for local environment
+            max_terminal_samples = min(5000, len(df))
+            if len(df) > max_terminal_samples:
+                df = df.sample(max_terminal_samples)
+                self._print(f"[yellow]Sampled {max_terminal_samples} records for terminal display[/]")
+
+            for col in numeric_cols:
+                try:
+                    self._terminal_distribution_plot(
+                        df[col].dropna(),
+                        col_name=col,
+                        width=terminal_width,
+                        height=terminal_height,
+                        bins=hist_bins
+                    )
+                except Exception as e:
+                    self._print(f"[red]Failed to plot {col}: {str(e)}[/]")
+            return None
+
+    def _terminal_distribution_plot(
+        self, 
+        data: pd.Series, 
+        col_name: str,
+        width: int = 80,
+        height: int = 20,
+        bins: int = 20
+    ) -> None:
+        """Generate terminal-optimized distribution visualization."""
+        try:
+            import plotext as plt
+        except ImportError:
+            return self._text_histogram_fallback(data, col_name, width, bins)
+
+        plt.clf()
+        plt.subplots(1, 2)
+        
+        # Histogram
+        plt.subplot(1, 1)
+        plt.hist(data, bins=bins)
+        plt.title(f"{col_name} Distribution")
+        plt.plot_size(width//2, height)
+        
+        # Box plot
+        plt.subplot(1, 2)
+        plt.box_plot(data)
+        plt.title(f"{col_name} Box Plot")
+        plt.plot_size(width//2, height)
+        
+        plt.show()
+        self._print("\n" + "-"*width + "\n")
+
+    def _text_histogram_fallback(
+        self, 
+        data: pd.Series, 
+        col_name: str, 
+        width: int, 
+        bins: int
+    ) -> None:
+        """ASCII histogram fallback when plotext is unavailable."""
+        from numpy import histogram, linspace
+        
+        counts, edges = histogram(data, bins=bins)
+        max_count = counts.max()
+        
+        self._print(f"\n[bold]{col_name} Distribution[/]")
+        self._print(f"Records: {len(data):,} | Min: {data.min():.2f} | Max: {data.max():.2f}")
+        
+        for i in range(bins):
+            bar_width = int((counts[i]/max_count) * (width-20)) if max_count > 0 else 0
+            self._print(
+                f"{edges[i]:>8.2f} - {edges[i+1]:<8.2f} | "
+                f"[cyan]{'█'*bar_width}[/] {counts[i]:,}"
+            )
 
     def _calculate_feature_stats(self, df: pd.DataFrame, col: str) -> Dict:
         """Calculate comprehensive statistics for a feature"""
