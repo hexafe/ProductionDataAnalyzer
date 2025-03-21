@@ -669,35 +669,30 @@ class ProductionDataAnalyzer:
             - Numeric IDs will be stringified (e.g., 00123 → '123')
             - For exact matching of zero-padded IDs, ensure ID columns  are stored as strings in your source data
         """
-        # Validate input DataFrames
+        # Input validation
         if production_data_df.empty or id_data_df.empty:
             raise ValueError("Input DataFrames cannot be empty")
-
-        # Verify ID column existence
+            
         if id_col not in production_data_df.columns:
-            raise KeyError(f"ID column '{id_col}' not found in production data")
+            raise KeyError(f"Missing ID column '{id_col}' in production data")
         if id_col not in id_data_df.columns:
-            raise KeyError(f"ID column '{id_col}' not found in reference data")
-
-        # Convert ID columns to string for type safety
+            raise KeyError(f"Missing ID column '{id_col}' in reference data")
+            
+        # Convert to string with NaN handling
         try:
-            production_ids = production_data_df[id_col].astype(str)
-            reference_ids = id_data_df[id_col].astype(str).unique()
-        except TypeError:
-            raise TypeError("ID columns could not be converted to string type")
-
-        # Create filter mask
-        filter_mask = production_ids.isin(reference_ids)
+            prod_ids = production_data_df[id_col].astype(str).fillna("NaN")
+            ref_ids = set(id_data_df[id_col].astype(str).fillna("NaN").unique())
+        except TypeError as e:
+            raise TypeError(f"ID column type conversion failed: {str(e)}")
+            
+        # Vectorized membership check using set for O(1) lookups
+        mask = prod_ids.isin(ref_ids)
         
-        # Check for matches
-        if not filter_mask.any():
+        if not mask.any():
             raise ValueError("No matching IDs found between datasets")
-
-        # Return filtered copy of data
-        filtered_df = production_data_df.loc[filter_mask].copy()
-        
-        # Reset index while preserving original order
-        return filtered_df.reset_index(drop=True)
+            
+        # Preserve original order and return copy
+        return production_data_df.loc[mask].copy().reset_index(drop=True)
 
     def save_to_csv(
         self,
