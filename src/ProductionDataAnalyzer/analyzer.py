@@ -24,6 +24,7 @@ from rich.progress import track
 from rich.markdown import Markdown
 from IPython import get_ipython
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import dask.dataframe as dd
 
 class ProductionDataAnalyzer:
     """
@@ -262,7 +263,7 @@ class ProductionDataAnalyzer:
                 continue
                 
         try:
-            return pd.to_datetime(date_str, dayfirst=False, yearfirst=False)
+            return pd.to_datetime(date_str, dayfirst=True, errors='coerce')
         except:
             return pd.NaT
         
@@ -524,7 +525,7 @@ class ProductionDataAnalyzer:
         try:
             if file_path.suffix.lower() in csv_ext:
                 if chunksize:
-                    chunks = pd.read_csv(file_path, chunksize=chunksize, **csv_kwargs)
+                    chunks = list(pd.read_csv(file_path, chunksize=chunksize, **csv_kwargs))
                     return pd.concat(chunks, ignore_index=True)
                 return pd.read_csv(file_path, **csv_kwargs)
             
@@ -868,54 +869,16 @@ class ProductionDataAnalyzer:
             'month': 'MS',
             'year': 'YS'
         }
-        if period not in period_map:
-            valid_options = list(period_map.keys())
-            raise ValueError(f"Invalid period. Valid options: {valid_options}")
+        
+        # Convert to Dask DataFrame for parallel processing
+        ddf = dd.from_pandas(self.production.set_index(self.date_col), npartitions=4)
 
-        # Check datetime column configuration
-        if not self.date_col:
-            raise ValueError("Temporal aggregation required date_col initialization")
+        # Perform resampling and aggregatrion in parallel
+        aggregated = ddf.resample(period_map[period]).mean().compute()
 
-        # Verify datetime column integrity
-        date_series = self.production[self.date_col]
-        if not pd.api.types.is_datetime64_any_dtype(date_series):
-            raise ValueError(f"Column '{self.date_col}' must be datetime type")
-        if date_series.is_monotonic_increasing is False:
-            raise ValueError(f"Column '{self.date_col}' must be sorted in ascending order")
-
-        # Identify numeric parameters for aggregation
-        numeric_cols = self.production.select_dtypes(include=np.number).columns
-        temporal_features = ['year', 'month', 'week', 'day']
-        numeric_params = [col for col in numeric_cols if col not in temporal_features]
-
-        if not numeric_params:
-            raise ValueError(f"No aggregatalbe numeric parameters found\nExcluded temporal features: {temporal_features}")
-
-        try:
-            self.daily_data = (
-                self.production
-                .set_index(self.date_col)
-                [numeric_params]
-                .resample(period_map[period])
-                .mean()
-                .reset_index()
-            )
-        except pd.error.OutOfBoundsDatetime:
-            raise ValueError("Datetime values outside pandas' supported range (1677-2262)")
-
-        self.selected_params = [
-            col for col in self.daily_data.columns
-            if col != self.date_col and pd.api.types.is_numeric_dtype(self.daily_data[col])
-        ]
-
-        # Store frequency configuration
-        self.agg_freq = period_map[period]
-        self.period = period
-
-        # Output status summary
-        row_count = len(self.daily_data)
-        param_count = len(self.selected_params)
-        print(f"Aggregated to {row_count} {period} intervals with {param_count} parameters")
+        # Convert back to pandas and format
+        self.aggregate_data = aggregated.round(4)
+        self._print(f"Aggregated data shape: {self.aggregate_data.shape}")
 
     def save_aggregated_data(self, filename: str = 'aggregated_data.csv') -> None:
         """
@@ -1573,6 +1536,8 @@ class ProductionDataAnalyzer:
             
             if self.date_col:
                 report_data['temporal_trends'] = self.plot_interactive_timeline()
+            else:
+                report_data['temporal_trends'] = None
             
             # Statistical insights
             report_data['statistical_insights'] = self._generate_statistical_insights(
@@ -1729,7 +1694,7 @@ class ProductionDataAnalyzer:
         from plotly.io import to_html
         
         html_content = []
-        for section in ['distributions', 'correlations', 'temporal_trends']:
+        for section in ['distribution_plots', 'correlations', 'temporal_trends']:
             if fig := report_data.get(section):
                 html_content.append(to_html(fig))
         
@@ -2021,36 +1986,34 @@ class ProductionDataAnalyzer:
     def plot_interactive_timeline(self, parameters: List[str] = None) -> go.Figure:
         """
         Create interactive time series visualization with multiple parameters
-
         Parameters:
             parameters (List[str]): List of parameters to visualize. 
-                                  Default: all numeric parameters
-
+                                Default: all numeric parameters
         Returns:
             go.Figure: Interactive Plotly figure with:
                 - Time series lines for selected parameters
                 - Control limit annotations (if defined)
                 - Range selector and hover tooltip
                 - Multiple y-axis support
-
         Raises:
             ValueError: If date column not configured or invalid parameters specified
         """
         if not self.date_col:
             raise ValueError("Time series visualization requires date column configuration\nInitialize analyzer with date_col parameter")
-
         numeric_params = self.production.select_dtypes(include=np.number).columns.tolist()
         params = parameters or numeric_params
         if self.date_col in params:
             params.remove(self.date_col)
-
         invalid_params = set(params) - set(numeric_params)
         if invalid_params:
             raise ValueError(f"Non-numeric parameters cannot be plotted: {invalid_params}")
-
         df = self.production.set_index(self.date_col)
         fig = px.line(df, x=df.index, y=params, title="Production Parameters Timeline")
-
+        
+        # Added warning for missing control limits
+        if not self.param_limits:
+            self._print("[yellow]No control limits defined. Plotting raw data only.[/]")
+        
         for param in params:
             if param in self.param_limits:
                 lower, upper = self.param_limits[param]
@@ -2058,7 +2021,6 @@ class ProductionDataAnalyzer:
                             annotation_text=f"{param} LSL")
                 fig.add_hline(y=upper, line_dash="dot", line_color="red",
                             annotation_text=f"{param} USL")
-
         fig.update_layout(
             xaxis_title="Time",
             yaxis_title="Parameter Values",
