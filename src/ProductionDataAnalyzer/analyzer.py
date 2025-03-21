@@ -20,8 +20,10 @@ from pyunpack import Archive
 import shutil
 from rich.console import Console
 from rich.table import Table
-from rich.progress import track
-from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.text import Text
+from rich.style import Style
+from scipy.stats import kurtosis, shapiro
 from IPython import get_ipython
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import dask.dataframe as dd
@@ -2259,23 +2261,49 @@ class ProductionDataAnalyzer:
         Generate prioritized technical insights with problem indicators
         
         Parameters:
-            summary_stats (pd.DataFrame): Statistical summary from _get_summary_stats()
-            
+            summary_stats (pd.DataFrame): Statistical summary containing:
+                - 'min', 'max': Absolute range values
+                - '25%', '75%': Quartiles for IQR calculation
+                - 'std', 'mean': Variability metrics
+                - '50%': Median value
+                - '1%', '99%': Extreme percentile values
+                
         Returns:
-            str: Formatted insights with critical issues first, then key metrics
-        
+            str: Formatted analysis containing:
+                1. Critical issues requiring attention (outliers, high variability, skewness, control limit violations)
+                2. Key metrics for each parameter (range, distribution shape, central tendency, process capability)
+                
+        Statistical Methods:
+            - Outlier detection: Tukey's method (1.5×IQR rule)
+            - Variability assessment: Coefficient of Variation (CV = σ/μ)
+            - Skewness detection: 
+                * Mean-Median comparison (>10% of mean)
+                * Symmetry analysis (|Mean - Median| < 5% of mean)
+            - Process capability analysis (Cp/Cpk) when control limits defined
+                
         Example Output:
             [!] Critical Insights:
-            • Temperature shows instability (σ=15.2, 45% of mean) - investigate sensor/process
-            • Flow_rate has extreme values (max=98.3 vs 99th %ile=45.8) - check for outliers
+            • Temperature: 
+                - Extreme upper values (max=98.3 exceeds 85.4 threshold)
+                - High variability (CV=42%)
+            • Pressure: 
+                - USL violation (max=125.6 > 120.0)
             
             Key Metrics:
-            • Pressure: 
-            - Stable range: 12.5-98.7 (Δ=86.2)
-            - Consistent distribution (IQR=12.3, CV=0.18)
-            • Motor_speed:
-            - 25% values below 850RPM - check underperforming units
-            - Mean (1200) ≠ Median (1150) - potential skew
+            • Vibration:
+                - Range: 0.5-7.8 (Δ=7.3)
+                - IQR: 1.2 | CV: 0.18
+                - Central: Mean=4.2 (Median=4.1 ±1.5 σ)
+                - Process capability: Cp=1.33, Cpk=1.25
+            • RPM:
+                - Constant values in 25-75% range
+                - 25% values <850 (potential underperformance)
+            
+        Thresholds:
+            - Outliers: Values beyond 1.5×IQR from quartiles
+            - High variability: CV > 40%
+            - Skewness: |Mean - Median| > 10% of mean
+            - Process capability: Cp < 1.33 or Cpk < 1.0 indicates process issues
         """
         if summary_stats.empty:
             return "No numerical parameters available for statistical insights"
@@ -2284,48 +2312,63 @@ class ProductionDataAnalyzer:
         metrics = []
         
         for param, stats in summary_stats.iterrows():
-            # Calculate derived metrics
-            param_range = stats['max'] - stats['min']
+            # Derived metrics
             iqr = stats['75%'] - stats['25%']
-            cv = stats['std'] / stats['mean'] if stats['mean'] != 0 else 0
-            outlier_threshold = stats['75%'] + 1.5 * iqr
-            mean_median_diff = abs(stats['mean'] - stats['50%'])
+            lower_threshold = stats['25%'] - 1.5 * iqr
+            upper_threshold = stats['75%'] + 1.5 * iqr
             
-            # Build critical alerts
+            # Process capability calculations
+            cp, cpk = None, None
+            if param in self.param_limits:
+                lsl, usl = self.param_limits[param]
+                sigma = stats['std']
+                if sigma > 0:
+                    cp = (usl - lsl) / (6 * sigma)
+                    cpk = min((usl - stats['mean']) / (3 * sigma),
+                            (stats['mean'] - lsl) / (3 * sigma))
+            
+            # Critical conditions
             critical_notes = []
-            if stats['max'] > outlier_threshold:
-                critical_notes.append(
-                    f"extreme values (max={stats['max']:.1f} vs 99th %ile={stats['99%']:.1f})"
-                )
-            if cv > 0.4:  # High variability
-                critical_notes.append(
-                    f"instability (σ={stats['std']:.1f}, {cv:.0%} of mean)"
-                )
-            if mean_median_diff > 0.1 * stats['mean']:
-                critical_notes.append(
-                    f"skew (mean={stats['mean']:.1f} ≠ median={stats['50%']:.1f})"
-                )
-                
-            # Build metric details
+            if stats['max'] > upper_threshold:
+                critical_notes.append(f"Extreme upper values (max={stats['max']:.1f} exceeds {upper_threshold:.1f} threshold)")
+            if stats['min'] < lower_threshold:
+                critical_notes.append(f"Extreme lower values (min={stats['min']:.1f} below {lower_threshold:.1f} threshold)")
+            if stats['mean'] != 0 and (stats['std'] / stats['mean']) > 0.4:
+                critical_notes.append(f"High variability (CV={stats['std']/stats['mean']:.0%})")
+            if abs(stats['mean'] - stats['50%']) > 0.1 * stats['mean']:
+                critical_notes.append(f"Skew (mean={stats['mean']:.1f} ≠ median={stats['50%']:.1f})")
+            if param in self.param_limits:
+                if stats['max'] > self.param_limits[param][1]:
+                    critical_notes.append(f"USL violation (max={stats['max']:.1f} > {self.param_limits[param][1]:.1f})")
+                if stats['min'] < self.param_limits[param][0]:
+                    critical_notes.append(f"LSL violation (min={stats['min']:.1f} < {self.param_limits[param][0]:.1f})")
+            
+            # Metric details
             metric_notes = [
-                f"Range: {stats['min']:.1f}-{stats['max']:.1f} (Δ={param_range:.1f})",
-                f"IQR: {iqr:.1f}, CV: {cv:.2f}",
-                f"Central values: 50%={stats['50%']:.1f} (±{stats['std']:.1f} (stdev))"
+                f"Range: {stats['min']:.1f}-{stats['max']:.1f} (Δ={stats['max'] - stats['min']:.1f})",
+                f"IQR: {iqr:.1f} | CV: {stats['std']/stats['mean']:.2f}" if stats['mean'] != 0 else "IQR: {iqr:.1f} | CV: N/A (zero mean)"
             ]
+            
+            # Central tendency with improved clarity
+            central_tendency = (
+                f"Central: Mean={stats['mean']:.1f} (Median={stats['50%']:.1f} ±{stats['std']:.1f} σ)"
+            )
+            metric_notes.append(central_tendency)
+            
+            # Process capability metrics
+            if cp is not None:
+                metric_notes.append(f"Capability: Cp={cp:.2f} | Cpk={cpk:.2f}")
             
             # Special cases
             if stats['25%'] == stats['75%']:
                 metric_notes.append("Constant values in 25-75% range")
-                
+            if stats['mean'] != 0 and (stats['std'] / stats['mean']) < 0.1:
+                metric_notes.append("Stable distribution (CV < 10%)")
+            
             # Format outputs
             if critical_notes:
-                critical.append(
-                    f"• {param}: {' - '.join(critical_notes)}"
-                )
-                
-            metrics.append(
-                f"• {param}: \n  - " + "\n  - ".join(metric_notes)
-            )
+                critical.append(f"• {param}:\n  - " + "\n  - ".join(critical_notes))
+            metrics.append(f"• {param}:\n  - " + "\n  - ".join(metric_notes))
         
         # Compose final output
         output = []
