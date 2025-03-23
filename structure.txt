@@ -1,0 +1,82 @@
+production_analyzer/
+├── production_analyzer/               # Root package directory
+│   ├── __init__.py                    # Package initialization and exports
+│   ├── core/                          # Core business logic components
+│   │   ├── __init__.py                # Core module exports
+│   │   ├── analysis/                  # Data analysis implementations
+│   │   │   ├── temporal_analysis.py   # Time-based analysis (trends, seasonality)
+│   │   │   ├── statistical.py         # Statistical process control (SPC) calculations
+│   │   │   ├── eda/                   # Exploratory Data Analysis components
+│   │   │   │   ├── basic_stats.py     # Descriptive statistics generation
+│   │   │   │   ├── outlier_detection.py # Outlier detection methods (IQR, Z-score)
+│   │   │   │   ├── visual_generator.py # Automated plot generation
+│   │   │   │   └── insight_engine.py  # Statistical insights generation
+│   │   │   └── ml/                    # Machine learning components
+│   │   │       ├── drift_detection.py # Concept drift detection
+│   │   │       ├── defect_predictor.py # Predictive quality models
+│   │   │       └── explanation_llm.py # LLM-based result interpretation
+│   │   ├── data_models/               # Data validation schemas
+│   │   │   ├── base.py                # Base Pydantic models
+│   │   │   ├── temporal.py            # Time-series data schemas
+│   │   │   └── quality.py             # Quality metrics schemas
+│   │   └── exceptions.py              # Custom exception classes
+│   ├── data/                          # Data ingestion and processing
+│   │   ├── __init__.py                # Data module exports
+│   │   ├── loader.py                  # Unified data loading interface
+│   │   ├── strategies/                # File format handlers
+│   │   │   ├── csv_handler.py         # CSV file loader
+│   │   │   ├── excel_handler.py       # Excel file loader
+│   │   │   ├── archive_handler.py     # ZIP/RAR archive handler
+│   │   │   └── multi_file_handler.py  # Directory/batch processing
+│   │   └── adapters/                  # Environment-specific adapters
+│   │       ├── colab_adapter.py       # Google Colab file handling
+│   │       └── local_adapter.py       # Local filesystem handling
+│   ├── visualization/                 # Data visualization components
+│   │   ├── __init__.py                # Visualization exports
+│   │   ├── base_renderer.py           # Abstract visualization interface
+│   │   ├── plotly/                    # Interactive visualizations
+│   │   │   ├── timeseries.py          # Time-series plots
+│   │   │   ├── correlation_matrix.py  # Correlation heatmaps
+│   │   │   └── dashboard.py           # Interactive dashboard builder
+│   │   └── terminal/                  # Console-based visualizations
+│   │       ├── table_renderer.py      # Rich text tables
+│   │       └── distribution_plots.py  # ASCII histograms
+│   ├── config/                        # Configuration management
+│   │   ├── __init__.py                # Config exports
+│   │   ├── settings.py                # Base configuration
+│   │   ├── colab.py                   # Colab-specific settings
+│   │   └── local.py                   # Local development settings
+│   ├── services/                      # Business workflow services
+│   │   ├── analysis_service.py        # Analysis orchestration
+│   │   ├── eda_service.py             # EDA workflow management
+│   │   └── report_service.py          # Report generation service
+│   └── utils/                         # Utility functions
+│       ├── date_utils.py              # Date/time helpers
+│       ├── file_utils.py              # File operations
+│       └── type_utils.py              # Data type conversions
+├── tests/                             # Test suite
+│   ├── unit/                          # Unit tests
+│   │   ├── test_data_ingestion.py     # Data loading tests
+│   │   ├── test_temporal_analysis.py  # Time analysis tests
+│   │   └── test_visualization.py      # Visualization tests
+│   ├── integration/                   # Integration tests
+│   │   └── test_full_workflow.py      # End-to-end workflow test
+│   ├── conftest.py                    # Test fixtures
+│   └── mocks/                         # Mock implementations
+│       ├── mock_google_sheets.py      # Google Sheets mock
+│       └── mock_file_system.py        # Filesystem mock
+├── docs/                              # Documentation
+│   ├── quickstart.md                  # Getting started guide
+│   ├── api_reference/                 # API documentation
+│   │   ├── core.md                    # Core module API
+│   │   └── data.md                    # Data module API
+│   └── architecture/                  # System architecture
+│       ├── component_diagram.md       # Component relationships
+│       └── decision_log.md            # Design decisions
+├── requirements/                      # Dependency management
+│   ├── base.txt                       # Core dependencies
+│   ├── dev.txt                        # Development tools
+│   └── colab.txt                      # Colab-specific dependencies
+├── setup.py                           # Package setup
+├── pyproject.toml                     # Modern build configuration
+└── entrypoints.py                     # CLI/API entry points
