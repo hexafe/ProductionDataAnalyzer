@@ -1,10 +1,13 @@
 from typing import Union, Optional, List
 from pathlib import Path
 import pandas as pd
+import warnings
 import dask.dataframe as dd
-from .strategies import CSVHandler, ExcelHandler, ArchiveHandler
-from ..core.processing import post_process_data
-from .adapters import ColabAdapter, LocalAdapter
+from .strategies.csv_handler import CSVHandler
+from .strategies.excel_handler import ExcelHandler
+from .strategies.archive_handler import ArchiveHandler
+from ..core.processing import DataProcessor
+from .adapters import get_adapter
 
 class DataLoader:
     """
@@ -19,13 +22,19 @@ class DataLoader:
     """
     def __init__(
         self,
-        adapter: str = 'colab',
+        adapter: str = None,
         use_dask: bool = False,
         auto_switch_threshold: float = 0.6,
         id_cols: Optional[List[str]] = None,
         **kwargs
     ):
-        self.adapter = ColabAdapter() if adapter == 'colab' else LocalAdapter()
+        if adapter is not None:
+            warnings.warn(
+                "'adapter' parameter is deprecated - environment detection is automatic", 
+                DeprecationWarning,
+                stacklevel=2
+            )
+        self.adapter = get_adapter()
         self.use_dask = use_dask
         self.auto_switch_threshold = auto_switch_threshold
         self.id_cols = id_cols or []
@@ -36,7 +45,7 @@ class DataLoader:
         self.strategies = [
             CSVHandler(use_dask=use_dask, **self.csv_kwargs),
             ExcelHandler(use_dask=use_dask, **self.excel_kwargs),
-            ArchiveHandler(self)
+            ArchiveHandler([CSVHandler(), ExcelHandler()])
         ]
 
     def load(
@@ -63,7 +72,7 @@ class DataLoader:
         if not self.use_dask and self._should_use_dask(raw_data):
             self.use_dask = True
             
-        processed_data = post_process_data(
+        processed_data = DataProcessor.process(
             raw_data,
             date_col=date_col,
             id_cols=self.id_cols,

@@ -1,6 +1,6 @@
 from .strategies.csv_handler import CSVHandler
 from .strategies.excel_handler import ExcelHandler
-from ..loader import BaseLoader
+from .strategies.base_strategy import BaseLoader
 
 class DataLoaderFactory:
     @staticmethod

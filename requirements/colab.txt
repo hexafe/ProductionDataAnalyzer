@@ -1,0 +1,5 @@
+-r base.txt  # Include core dependencies
+
+# Colab environment requirements
+google-colab>=1.0.0      # Colab interface
+ipython>=7.0.0           # Enhanced REPL

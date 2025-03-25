@@ -1,11 +1,22 @@
-from google.colab import files
 import os
 import shutil
 from pathlib import Path
 from typing import Union, List
 from tempfile import TemporaryDirectory
+from .base_adapter import BaseAdapter
 
-class ColabAdapter:
+try:
+    from google.colab import files
+    from google.colab import auth
+    from google.auth import default
+    HAS_COLAB = True
+except ImportError:
+    HAS_COLAB = False
+class ColabAdapter(BaseAdapter):
+    def __init__(self):
+        if not HAS_COLAB:
+            raise RuntimeError("ColabAdapter requires Google Colab environment")
+        
     def get_available_memory(self) -> float:
         """
         Get available system memory in GB

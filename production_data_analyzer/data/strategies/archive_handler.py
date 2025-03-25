@@ -1,5 +1,7 @@
 from pathlib import Path
-from typing import List
+from typing import List, Union
+import pandas as pd
+import dask.dataframe as dd
 from .base_strategy import BaseLoader
 from ..adapters import get_adapter
 
@@ -11,14 +13,26 @@ class ArchiveHandler(BaseLoader):
         self.adapter = get_adapter()
         self.strategies = strategies
 
-    def load(self, file_path: Path) -> List[Path]:
+    def load(self, file_path: Path) -> Union[pd.DataFrame, dd.DataFrame]:
+        """Loac and combine data from archive"""
         extract_dir = self.adapter.extract_archive(file_path)
-        return self._process_extracted_files(extract_dir)
-
-    def _process_extracted_files(self, directory: Path) -> List[Path]:
+        processed_files = self._process_extracted_files(extract_dir)
+        
+        return self._combine_results(processed_files)
+    
+    def _process_extracted_files(self, directory: Path) -> list:
         processed = []
-        for strategy in self.strategies:
-            for file in directory.rglob('*'):
+        for file in directory.rglob('*'):
+            for strategy in self.strategies:
                 if strategy.supports(file):
-                    processed.append(strategy.load(file))
+                    processed.append({strategy.load(file)})
+                    break
         return processed
+    
+    def _combine_results(self, results: list) -> Union[pd.DataFrame, dd.DataFrame]:
+        if not results:
+            raise ValueError("No loadable files found in archive")
+        
+        if isinstance(results[0], pd.DataFrame):
+            return pd.concat(results, ignore_index=True)
+        return dd.concat(results, axis=0)

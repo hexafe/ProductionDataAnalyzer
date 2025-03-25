@@ -1,2 +1,18 @@
-patool==3.1.3
-pyunpack==0.3
+# Core data processing
+pandas>=1.3.0
+dask[dataframe]>=2021.0.0
+numpy>=1.21.0
+openpyxl>=3.0.0  # Excel support
+
+# File format handling
+pyunpack>=0.2.0  # Archive extraction
+patool>=1.12      # Archive backend
+chardet>=4.0.0    # Encoding detection
+
+# Google APIs
+google-auth>=2.0.0
+gspread>=5.0.0
+
+# Visualization
+matplotlib>=3.4.0
+python-dateutil>=2.8.0  # Date handling
