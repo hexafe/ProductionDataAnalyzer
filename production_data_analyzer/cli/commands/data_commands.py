@@ -1,18 +1,21 @@
 import click
-from production_data_analyzer.services import CLIService
+from .base_command import BaseCommand
 
-@click.group()
-def data():
-    """Data management commands"""
-    pass
+cli = click.Group(name='data', help='Data management commands')
 
-@data.command()
-@click.argument('source')
-@click.pass_context
-def load(ctx, source):
-    """Load production data"""
-    try:
-        result = ctx.obj['service'].load_data(source)
-        click.echo(result)
-    except Exception as e:
-        click.secho(f"Error: {str(e)}", fg='red')
+class LoadCommand(BaseCommand):
+    def __init__(self):
+        super().__init__(name='load', help='Load production data')
+        self.params.append(click.Argument(['source']))
+        self.params.append(click.Option(
+            ['--session', '-s'], 
+            default='default',
+            help='Target session name'
+        ))
+
+    def handle(self, service, config, source, session, **kwargs):
+        return service.load_data(source, session)
+
+cli.add_command(LoadCommand())
+
+__all__ = ['cli']

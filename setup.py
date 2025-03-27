@@ -12,7 +12,9 @@ setup(
         'python-dateutil',
         'click',
         'tabulate',
-        'pydantic'
+        'pydantic',
+        'pyarrow',
+        'click-repl'
     ],
     extras_require={
         'colab': [

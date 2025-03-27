@@ -1,22 +1,32 @@
 import click
 from .base_command import BaseCommand
+from production_data_analyzer.core.analysis.temporal_analysis import TemporalAnalyzer
 
-class AnalyzeCommand(BaseCommand):
-    def __init__(self, *args, **kwargs):
-        kwargs.setdefault('name', 'analyze')
-        kwargs.setdefault('help', 'Run temporal analysis')
-        super().__init__(*args, **kwargs)
+cli = click.Group(name='analyze', help='Temporal analysis commands')
 
-    def handle(self, service, config, **kwargs):
-        time_col = kwargs['time_col']
-        window = kwargs.get('window', '7D')
-        
-        result = service.analyze_temporal(time_col, window=window)
-        return service.formatter.format(result, config.format)
+class TemporalAnalysisCommand(BaseCommand):
+    def __init__(self):
+        super().__init__(
+            name='temporal',
+            help='Run temporal analysis on loaded data'
+        )
+        # Add command-specific parameters
+        self.params.extend([
+            click.Argument(['time_col']),
+            click.Option(['--window', '-w'], default='7D'),
+            click.Option(['--session', '-s'], default='default')
+        ])
 
-@click.command(cls=AnalyzeCommand)
-@click.option('--time-col', required=True, help='Name of the datetime column')
-@click.option('--window', default='7D', help='Time window for aggregation')
-def analyze():
-    """Entry point for the analyze command"""
-    pass
+    def handle(self, service, config, time_col, window, session, **kwargs):
+        df = service.active_sessions.get(session)
+        if df is None:
+            raise ValueError(f"No data in session '{session}'. Load data first.")
+            
+        analyzer = TemporalAnalyzer(df, time_col)
+        result = analyzer.rolling_aggregation(window)
+        return service.formatter.format_table(result)
+
+# Add the command to the group
+cli.add_command(TemporalAnalysisCommand())
+
+__all__ = ['cli']
