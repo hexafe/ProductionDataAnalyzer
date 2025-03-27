@@ -169,3 +169,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+production_data_analyzer/structure.txt
+production_data_analyzer/project_snapshot.txt
+production_data_analyzer/ProductionDataAnalyzer_legacy_for_reference_only.py
+production_data_analyzer/generate_snapshot.cmd
