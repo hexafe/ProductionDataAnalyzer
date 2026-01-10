@@ -1,29 +1,30 @@
 # Production Data Analyzer
 
-Production data analysis toolkit with integrated quality analytics
+Production data analysis toolkit designed to support quality investigations,
+process analysis, and data-driven decision-making in manufacturing environments.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/hexafe/ProductionDataAnalyzer)
 
 ## Features
 
 ### Data Management
-- Multi-format ingestion (CSV/Excel/ZIP/7z/RAR)
+- Multi-format ingestion (CSV / Excel / ZIP / 7z / RAR)
 - Time-indexed dataset organization
 - Part ID-based filtering and segmentation
-- Google Sheets integration with OAuth
+- Google Sheets integration (OAuth)
 
-### Temporal Analysis (Upcoming)
-- Flexible aggregation (minute/hourly/daily/weekly/monthly)
-- Statistical timeframe comparison (T-test)
+### Temporal Analysis *(planned)*
+- Flexible aggregation (minute / hourly / daily / weekly / monthly)
+- Statistical timeframe comparison (t-test)
 - Interactive time-series visualization
 
-### Production Statistics (Upcoming)
+### Production Statistics *(planned)*
 - Statistical Process Control (SPC) charting
 - Process capability analysis (Cp/Cpk/Ppk)
 - Parameter limit configuration from multiple sources
 - Multivariate correlation analysis
 
-### Machine Learning (Upcoming)
+### Machine Learning *(planned)*
 - Defect prediction models (RandomForest/XGBoost/LightGBM/CatBoost)
 - Explainable AI with SHAP values
 - Concept drift detection
